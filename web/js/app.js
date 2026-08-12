@@ -154,8 +154,8 @@
       { label: "Valor de la cartera", value: EUR.format(last.value), sub: "efectivo: " + EUR.format(last.cash) },
       { label: "Aportado neto", value: EUR0.format(netDeposits), sub: `ingresos ${EUR0.format(st.totals.deposits)} · retiradas ${EUR0.format(-st.totals.withdrawals)}` },
       { label: "Ganancia total", value: EUR0.format(totalGain), cls: totalGain >= 0 ? "pos" : "neg", sub: PCT(netDeposits > 0 ? totalGain / netDeposits : null) + " sobre aportado" },
-      { id: "cardXirr", label: "¿Cuánto rinde mi dinero?", value: irr != null ? PCT(irr) : "—", cls: (irr ?? 0) >= 0 ? "pos" : "neg", sub: "% anual real, contando tus ingresos y retiradas" },
-      { id: "cardTwr", label: "¿Cómo lo hace mi estrategia?", value: PCT(twrTotal), cls: twrTotal >= 0 ? "pos" : "neg", sub: twrSub(twrTotal, (new Date(last.day) - st.firstDate) / (365.25 * 86400e3)) },
+      { id: "cardXirr", label: "¿Cuánto rinde mi dinero?", value: "—", sub: "" },
+      { id: "cardTwr", label: "¿Cómo lo hace mi estrategia?", value: "—", sub: "" },
       { label: "Dividendos + préstamo", value: EUR0.format(st.totals.dividendsEUR + st.totals.lendingEUR), sub: "comisiones: " + EUR0.format(st.totals.fees) },
     ];
     $("summaryCards").innerHTML = cards.map(c =>
@@ -202,16 +202,6 @@
     updateRangeCards();
   }
 
-  /** Subtítulo de la tarjeta TWR: acumulada + anualizada equivalente. */
-  function twrSub(twrPeriod, years) {
-    let s = "acumulada, comparable con los índices";
-    if (twrPeriod != null && years >= 1 && twrPeriod > -1) {
-      const annual = Math.pow(1 + twrPeriod, 1 / years) - 1;
-      s += ` · ${PCT(annual)} anualizada`;
-    }
-    return s;
-  }
-
   /** Recalcula las tarjetas de rentabilidad para el rango filtrado. */
   function updateRangeCards() {
     const m = DG.rangeMetrics(ctx.valueSeries, ctx.twr, ctx.state.flows, ctx.range);
@@ -228,17 +218,22 @@
       el.querySelector(".sub").textContent = sub;
     };
 
-    // XIRR: anualizada si el rango ≥ 1 año; si es menor, del periodo sin
-    // anualizar (anualizar rangos cortos infla el número y confunde)
+    // Anualizada en grande, acumulada en pequeño. Si el rango es <1 año,
+    // se muestra la del periodo en grande (anualizar rangos cortos confunde).
+    const twrAnnual = (m.twrPeriod != null && m.years >= 1 && m.twrPeriod > -1)
+      ? Math.pow(1 + m.twrPeriod, 1 / m.years) - 1 : null;
+
     if (m.years >= 1) {
       setCard("cardXirr", m.xirr != null ? PCT(m.xirr) : "—", (m.xirr ?? 0) >= 0 ? "pos" : "neg",
-        "% anual real, contando tus ingresos y retiradas" + rangeTxt);
+        `anual, con tu timing de aportaciones · acumulado ${PCT(m.periodMoney)}` + rangeTxt);
+      setCard("cardTwr", twrAnnual != null ? PCT(twrAnnual) : "—", (twrAnnual ?? 0) >= 0 ? "pos" : "neg",
+        `anual, comparable con índices · acumulado ${PCT(m.twrPeriod)}` + rangeTxt);
     } else {
       setCard("cardXirr", m.periodMoney != null ? PCT(m.periodMoney) : "—", (m.periodMoney ?? 0) >= 0 ? "pos" : "neg",
-        "% del periodo, sin anualizar" + rangeTxt);
+        "del periodo, sin anualizar (rango < 1 año)" + rangeTxt);
+      setCard("cardTwr", m.twrPeriod != null ? PCT(m.twrPeriod) : "—", (m.twrPeriod ?? 0) >= 0 ? "pos" : "neg",
+        "del periodo, comparable con índices (rango < 1 año)" + rangeTxt);
     }
-    setCard("cardTwr", m.twrPeriod != null ? PCT(m.twrPeriod) : "—", (m.twrPeriod ?? 0) >= 0 ? "pos" : "neg",
-      twrSub(m.twrPeriod, m.years) + rangeTxt);
   }
 
   // rangos

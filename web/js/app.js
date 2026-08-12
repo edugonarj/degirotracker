@@ -164,7 +164,6 @@
 
     renderBenchToggles();
     drawPerf();
-    DG.renderMoneyChart(ctx.moneySeries);
     renderTable("open");
     renderWarnings();
 
@@ -198,6 +197,8 @@
 
   function drawPerf() {
     DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range);
+    // el gráfico de dinero comparte el mismo rango de fechas
+    DG.renderMoneyChart(ctx.moneySeries, ctx.range);
   }
 
   // rangos

@@ -79,27 +79,40 @@
     ctx.ondblclick = () => perfChart.resetZoom();
   };
 
-  DG.renderMoneyChart = function (moneySeries) {
-    const labels = moneySeries.map(m => m.month);
+  /**
+   * @param moneySeries serie mensual completa
+   * @param range {from,to} dayKeys — mismo filtro de fechas que el gráfico
+   *              de rendimiento (se comparan por mes 'YYYY-MM')
+   */
+  DG.renderMoneyChart = function (moneySeries, range) {
+    let rows = moneySeries;
+    if (range) {
+      const mFrom = range.from.slice(0, 7), mTo = range.to.slice(0, 7);
+      rows = moneySeries.filter(m => m.month >= mFrom && m.month <= mTo);
+    }
+    if (!rows.length) rows = moneySeries;
     const cfg = {
       data: {
-        labels,
+        labels: rows.map(m => m.month),
         datasets: [
           {
             type: "bar", label: "Aportación neta acumulada",
-            data: moneySeries.map(m => m.netCum),
+            data: rows.map(m => m.netCum),
             backgroundColor: "rgba(0,41,78,.55)", borderRadius: 2, order: 3,
+            stack: "money",
           },
           {
             type: "bar", label: "Ganancia (valor − aportado)",
-            data: moneySeries.map(m => m.gain),
-            backgroundColor: moneySeries.map(m => (m.gain ?? 0) >= 0 ? "rgba(46,158,91,.65)" : "rgba(214,69,65,.65)"),
+            data: rows.map(m => m.gain),
+            backgroundColor: rows.map(m => (m.gain ?? 0) >= 0 ? "rgba(46,158,91,.65)" : "rgba(214,69,65,.65)"),
             borderRadius: 2, order: 2,
+            stack: "money",
           },
           {
             type: "line", label: "Valor de la cartera",
-            data: moneySeries.map(m => m.value),
+            data: rows.map(m => m.value),
             borderColor: "#009fdf", borderWidth: 2, pointRadius: 0, tension: .15, order: 1,
+            stack: "valor",
           },
         ],
       },
@@ -107,8 +120,9 @@
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: "index", intersect: false },
         scales: {
-          x: { stacked: false, grid: { display: false } },
-          y: { ticks: { callback: v => EUR.format(v) } },
+          // Barras apiladas: aportado + ganancia = altura total (el valor)
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, ticks: { callback: v => EUR.format(v) } },
         },
         plugins: {
           legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },

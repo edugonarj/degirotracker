@@ -41,22 +41,16 @@
 
   /**
    * Construye la serie diaria de valor de cartera en EUR.
-   * @param state resultado de DG.replay
-   * @param priceProviders Map isin -> {kind:'yahoo'|'fallback', map?, meta?, fb?}
-   * @param fxSeries Map cur -> Map dayKey->rate (EURxxx=X)
    */
   DG.buildValueSeries = function (state, priceProviders, fxSeries) {
-    // Valorar hasta hoy: las posiciones siguen vivas después del último
-    // movimiento del extracto y los precios de mercado siguen actualizándose
     const today = new Date();
     const endDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
     const days = dayRange(state.firstDate, endDate > state.lastDate ? endDate : state.lastDate);
     const snaps = state.snapshots;
     const missingPrices = new Set();
 
-    // snapshot vigente para cada día
     let si = 0;
-    const series = []; // {day, value, cash, holdings}
+    const series = []; 
     let lastSnap = { positions: {}, cash: {} };
 
     for (const day of days) {
@@ -96,8 +90,7 @@
   };
 
   /**
-   * TWR diaria encadenada, neutralizando flujos externos.
-   * Devuelve [{day, index}] con base 100 en el primer día.
+   * TWR diaria encadenada, neutralizando flujos externos con lógica asimétrica.
    */
   DG.buildTWR = function (series, flows) {
     const flowByDay = new Map();
@@ -111,8 +104,24 @@
     for (const pt of series) {
       if (prev !== null) {
         const flow = flowByDay.get(pt.day) || 0;
-        const base = prev + flow; // flujo al inicio del día
-        if (base > 1e-9) idx *= pt.value / base;
+        
+        if (flow > 0) {
+          // Depósito: Asumimos que entra al inicio del día
+          const base = prev + flow;
+          if (base > 1e-9) {
+            idx *= pt.value / base;
+          }
+        } else if (flow < 0) {
+          // Retirada: Asumimos que sale al final del día
+          if (prev > 1e-9) {
+            idx *= (pt.value - flow) / prev;
+          }
+        } else {
+          // Día normal sin movimientos
+          if (prev > 1e-9) {
+            idx *= pt.value / prev;
+          }
+        }
       }
       out.push({ day: pt.day, index: idx });
       prev = pt.value;
@@ -122,7 +131,6 @@
 
   /** XIRR (rentabilidad anualizada ponderada por dinero) por bisección. */
   DG.xirr = function (flows, finalValue, finalDate) {
-    // convención: ingreso = flujo negativo para el inversor
     const cfs = flows.map(f => ({ t: f.date.getTime(), v: -f.amount }));
     cfs.push({ t: finalDate.getTime(), v: finalValue });
     const t0 = cfs[0].t;
@@ -175,20 +183,15 @@
     return rows;
   };
 
-  /**
-   * Métricas del rango de fechas filtrado: TWR del periodo y XIRR tratando
-   * el valor de la cartera al inicio del rango como aportación inicial.
-   */
+  /** Métricas del rango de fechas filtrado. */
   DG.rangeMetrics = function (series, twr, flows, range) {
     const pts = series.filter(p => p.day >= range.from && p.day <= range.to);
     if (pts.length < 2) return null;
     const first = pts[0], last = pts[pts.length - 1];
 
-    // TWR del rango (re-basado)
     const tw = twr.filter(p => p.day >= range.from && p.day <= range.to);
     const twrPeriod = tw.length >= 2 ? tw[tw.length - 1].index / tw[0].index - 1 : null;
 
-    // XIRR del rango: "compras" toda la cartera el primer día por su valor
     const dFrom = new Date(first.day + "T00:00:00Z");
     const dTo = new Date(last.day + "T00:00:00Z");
     const rangeFlows = [{ date: dFrom, amount: first.value }];
@@ -198,7 +201,6 @@
     }
     const irr = DG.xirr(rangeFlows, last.value, dTo);
     const years = (dTo - dFrom) / (365.25 * 86400e3);
-    // rentabilidad money-weighted del periodo sin anualizar
     const periodMoney = (irr != null && years > 0) ? Math.pow(1 + irr, years) - 1 : null;
 
     return { twrPeriod, xirr: irr, periodMoney, years, startValue: first.value, endValue: last.value };
@@ -206,7 +208,7 @@
 
   /** Serie mensual: aportación neta acumulada vs valor de cartera. */
   DG.buildMoneySeries = function (series, flows) {
-    const byMonth = new Map(); // 'YYYY-MM' -> {net, value(último día del mes)}
+    const byMonth = new Map();
     for (const f of flows) {
       const k = DG.dayKey(f.date).slice(0, 7);
       if (!byMonth.has(k)) byMonth.set(k, { net: 0, value: null });
@@ -215,7 +217,7 @@
     for (const pt of series) {
       const k = pt.day.slice(0, 7);
       if (!byMonth.has(k)) byMonth.set(k, { net: 0, value: null });
-      byMonth.get(k).value = pt.value; // se sobreescribe hasta el último día
+      byMonth.get(k).value = pt.value; 
     }
     const months = [...byMonth.keys()].sort();
     let cum = 0;

@@ -154,8 +154,8 @@
       { label: "Valor de la cartera", value: EUR.format(last.value), sub: "efectivo: " + EUR.format(last.cash) },
       { label: "Aportado neto", value: EUR0.format(netDeposits), sub: `ingresos ${EUR0.format(st.totals.deposits)} · retiradas ${EUR0.format(-st.totals.withdrawals)}` },
       { label: "Ganancia total", value: EUR0.format(totalGain), cls: totalGain >= 0 ? "pos" : "neg", sub: PCT(netDeposits > 0 ? totalGain / netDeposits : null) + " sobre aportado" },
-      { id: "cardXirr", label: "Rentabilidad anualizada", value: irr != null ? PCT(irr) : "—", cls: (irr ?? 0) >= 0 ? "pos" : "neg", sub: "XIRR (ponderada por dinero)" },
-      { id: "cardTwr", label: "Rentabilidad acumulada", value: PCT(twrTotal), cls: twrTotal >= 0 ? "pos" : "neg", sub: "TWR (comparable con índices)" },
+      { id: "cardXirr", label: "¿Cuánto rinde mi dinero?", value: irr != null ? PCT(irr) : "—", cls: (irr ?? 0) >= 0 ? "pos" : "neg", sub: "% anual real, contando tus ingresos y retiradas" },
+      { id: "cardTwr", label: "¿Cómo lo hace mi estrategia?", value: PCT(twrTotal), cls: twrTotal >= 0 ? "pos" : "neg", sub: twrSub(twrTotal, (new Date(last.day) - st.firstDate) / (365.25 * 86400e3)) },
       { label: "Dividendos + préstamo", value: EUR0.format(st.totals.dividendsEUR + st.totals.lendingEUR), sub: "comisiones: " + EUR0.format(st.totals.fees) },
     ];
     $("summaryCards").innerHTML = cards.map(c =>
@@ -202,6 +202,16 @@
     updateRangeCards();
   }
 
+  /** Subtítulo de la tarjeta TWR: acumulada + anualizada equivalente. */
+  function twrSub(twrPeriod, years) {
+    let s = "acumulada, comparable con los índices";
+    if (twrPeriod != null && years >= 1 && twrPeriod > -1) {
+      const annual = Math.pow(1 + twrPeriod, 1 / years) - 1;
+      s += ` · ${PCT(annual)} anualizada`;
+    }
+    return s;
+  }
+
   /** Recalcula las tarjetas de rentabilidad para el rango filtrado. */
   function updateRangeCards() {
     const m = DG.rangeMetrics(ctx.valueSeries, ctx.twr, ctx.state.flows, ctx.range);
@@ -222,13 +232,13 @@
     // anualizar (anualizar rangos cortos infla el número y confunde)
     if (m.years >= 1) {
       setCard("cardXirr", m.xirr != null ? PCT(m.xirr) : "—", (m.xirr ?? 0) >= 0 ? "pos" : "neg",
-        "XIRR anualizada" + rangeTxt);
+        "% anual real, contando tus ingresos y retiradas" + rangeTxt);
     } else {
       setCard("cardXirr", m.periodMoney != null ? PCT(m.periodMoney) : "—", (m.periodMoney ?? 0) >= 0 ? "pos" : "neg",
-        "del periodo, sin anualizar" + rangeTxt);
+        "% del periodo, sin anualizar" + rangeTxt);
     }
     setCard("cardTwr", m.twrPeriod != null ? PCT(m.twrPeriod) : "—", (m.twrPeriod ?? 0) >= 0 ? "pos" : "neg",
-      "TWR (comparable con índices)" + rangeTxt);
+      twrSub(m.twrPeriod, m.years) + rangeTxt);
   }
 
   // rangos

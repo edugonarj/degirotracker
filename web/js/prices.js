@@ -1,20 +1,17 @@
 /**
  * prices.js — Precios históricos desde Yahoo Finance (vía proxy CORS público)
  * con fallback a los precios de tus propias operaciones.
- *
- * Mapeo ISIN -> ticker de Yahoo. Los ISIN que no estén aquí se intentan
- * resolver con la búsqueda de Yahoo; si falla, se usan los precios de
- * las transacciones (escalón entre operaciones).
  */
 "use strict";
 
 (function () {
   const DG = window.DG;
 
-  // Proxies CORS: se intentan en orden.
+  // Proxies CORS ampliados para mayor fiabilidad
   const PROXIES = [
     u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
     u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
   ];
 
   DG.BENCHMARKS = [
@@ -25,97 +22,97 @@
     { id: "numantia", label: "Numantia Patrimonio", symbol: "0P000168OI.F", color: "#666f7a", on: false },
   ];
 
-  // ISIN conocidos -> símbolo Yahoo (cartera del usuario). Se amplía dinámicamente.
+  // ISIN conocidos -> símbolo Yahoo
   DG.ISIN_TO_YAHOO = {
-    "US00217D1000": "ASTS",      // AST SpaceMobile
-    "US5901061003": "MRLN",      // Merlin Inc
-    "CA0074082060": "ACT.TO",    // Aduro Clean Technologies
-    "IE00BK5BZX59": "GOO3.L",    // Leverage Shares 3x Alphabet
-    "IE00BK5C1B80": "FB3.L",     // Leverage Shares 3x Meta
-    "IE00BK5BZV36": "MSF3.L",    // Leverage Shares 3x Microsoft
-    "GB00BJYDH287": "BTCW.SW",   // WisdomTree Physical Bitcoin
-    "XS2595672036": "TLT5.L",    // Leverage Shares 5x 20+Y Treasury
-    "CA11271J1075": "BN",        // Brookfield Corporation
-    "FR0000121014": "MC.PA",     // LVMH
-    "CA3803551074": "GSY.TO",    // goeasy
-    "US4330001060": "HIMS",      // Hims & Hers
-    "IE00B4ND3602": "IGLN.L",    // iShares Physical Gold (USD)
-    "DE000A3H2200": "NA9.DE",    // Nagarro
-    "PLDINPL00011": "DNP.WA",    // Dino Polska
-    "US30292L1070": "FRPH",      // FRP Holdings
-    "FR0000051807": "TEP.PA",    // Teleperformance
-    "CA2674881040": "DND.TO",    // Dye & Durham
-    "CA5266821092": "LNF.TO",    // Leon's Furniture
-    "CA09173B1076": "BITF",      // Bitfarms
-    "CA3615692058": "GDI.TO",    // GDI Integrated
-    "US22160K1051": "COST",      // Costco
-    "NL0006294274": "ENX.PA",    // Euronext
-    "AU0000185993": "IREN",      // IREN
-    "NL0015000IY2": "UMG.AS",    // Universal Music Group
-    "CA55378N1078": "MTY.TO",    // MTY Food Group
-    "AU0000056269": "MAD.AX",    // Mader Group
-    "DE000FTG1111": "FTK.DE",    // flatexDEGIRO
-    "AU0000048001": "AFL.AX",    // AF Legal
-    "IT0005439085": "TISG.MI",   // Italian Sea Group
-    "CA21250C1068": "CTS.TO",    // Converge Technology
-    "IT0005385213": "NWL.MI",    // NewPrinces (Newlat)
-    "CA59162N1096": "MRU.TO",    // Metro
-    "CA0679011084": "GOLD",      // Barrick Gold
-    "US00287Y1091": "ABBV",      // AbbVie
-    "IE00BF4RFH31": "IUSN.DE",   // iShares MSCI World Small Cap
-    "IT0003549422": "SL.MI",     // Sanlorenzo
-    "ES0183746314": "VID.MC",    // Vidrala
-    "US30212P3038": "EXPE",      // Expedia
-    "US0463531089": "AZN",       // AstraZeneca ADR
-    "US43300A2033": "HLT",       // Hilton
+    "US00217D1000": "ASTS",      
+    "US5901061003": "MRLN",      
+    "CA0074082060": "ACT.TO",    
+    "IE00BK5BZX59": "GOO3.L",    
+    "IE00BK5C1B80": "FB3.L",     
+    "IE00BK5BZV36": "MSF3.L",    
+    "GB00BJYDH287": "BTCW.SW",   
+    "XS2595672036": "TLT5.L",    
+    "CA11271J1075": "BN",        
+    "FR0000121014": "MC.PA",     
+    "CA3803551074": "GSY.TO",    
+    "US4330001060": "HIMS",      
+    "IE00B4ND3602": "IGLN.L",    
+    "DE000A3H2200": "NA9.DE",    
+    "PLDINPL00011": "DNP.WA",    
+    "US30292L1070": "FRPH",      
+    "FR0000051807": "TEP.PA",    
+    "CA2674881040": "DND.TO",    
+    "CA5266821092": "LNF.TO",    
+    "CA09173B1076": "BITF",      
+    "CA3615692058": "GDI.TO",    
+    "US22160K1051": "COST",      
+    "NL0006294274": "ENX.PA",    
+    "AU0000185993": "IREN",      
+    "NL0015000IY2": "UMG.AS",    
+    "CA55378N1078": "MTY.TO",    
+    "AU0000056269": "MAD.AX",    
+    "DE000FTG1111": "FTK.DE",    
+    "AU0000048001": "AFL.AX",    
+    "IT0005439085": "TISG.MI",   
+    "CA21250C1068": "CTS.TO",    
+    "IT0005385213": "NWL.MI",    
+    "CA59162N1096": "MRU.TO",    
+    "CA0679011084": "GOLD",      
+    "US00287Y1091": "ABBV",      
+    "IE00BF4RFH31": "IUSN.DE",   
+    "IT0003549422": "SL.MI",     
+    "ES0183746314": "VID.MC",    
+    "US30212P3038": "EXPE",      
+    "US0463531089": "AZN",       
+    "US43300A2033": "HLT",       
     "US4592001014": "IBM",
-    "US9497461015": "WFC",       // Wells Fargo
-    "US00206R1023": "T",         // AT&T
-    "US2561631068": "DOCU",      // DocuSign
+    "US9497461015": "WFC",       
+    "US00206R1023": "T",         
+    "US2561631068": "DOCU",      
     "US0079031078": "AMD",
-    "PLATPRT00018": "APR.WA",    // Auto Partner
-    "US79466L3024": "CRM",       // Salesforce
-    "NL0010273215": "ASML.AS",   // ASML
-    "NL0009805522": "NBIS",      // Nebius
-    "US78409V1044": "SPGI",      // S&P Global
-    "US01609W1027": "BABA",      // Alibaba ADR
-    "LU1681048630": "GLUX.PA",   // Amundi Global Luxury
-    "US68236H2040": "ONDS",      // Ondas
-    "US6877931096": "OSCR",      // Oscar Health
-    "GB0002875804": "BATS.L",    // British American Tobacco
-    "IE00BK5BZS07": "AAP3.L",    // Leverage Shares 3x Apple
-    "IE00B8K7KM88": "3USS.MI",   // WisdomTree S&P500 3x Short
-    "CA55027C1068": "LMN.V",     // Lumine Group
-    "US92826C8394": "V",         // Visa
-    "IE00B7Y34M31": "3USL.L",    // WisdomTree S&P500 3x Lev
-    "GB0006215205": "MCG.L",     // Mobico
-    "AU000000KPG7": "KPG.AX",    // Kelly Partners
-    "US17253J1060": "CIFR",      // Cipher Mining
-    "IE00BK5BZQ82": "AMZ3.L",    // Leverage Shares 3x Amazon
-    "US5835433013": "SLNH",      // Soluna
-    "US57636Q1040": "MA",        // Mastercard
-    "CA50077N1024": "PNG.V",     // Kraken Robotics
-    "US0258161092": "AXP",       // American Express
-    "FR0000072597": "ALITL.PA",  // IT Link
-    "US2473617023": "DAL",       // Delta
-    "DE0007236101": "SIE.DE",    // Siemens
-    "AU0000109159": "DUR.AX",    // Duratec
-    "US3927091013": "GRBK",      // Green Brick
-    "IE00BMC38736": "SMH.L",     // VanEck Semiconductor
-    "GB00B3FBWW43": "SDI.L",     // SDI Group
-    "US0970231058": "BA",        // Boeing
-    "CH1134540470": "ONON",      // On Holding
-    "US85208M1027": "SFM",       // Sprouts
-    "US1912161007": "KO",        // Coca-Cola
-    "US70450Y1038": "PYPL",      // PayPal
-    "IE00B3XXRP09": "VUSA.L",    // Vanguard S&P 500
-    "IE0001827041": "CRH",       // CRH
-    "US7170811035": "PFE",       // Pfizer
-    "CA82509L1076": "SHOP",      // Shopify
-    "FI4000391487": "RELAIS.HE", // Relais Group
-    "IE00B60SX394": "SC0J.DE",   // Invesco MSCI World
-    "US8522341036": "XYZ",       // Block
-    "ES0105025003": "MRL.MC",    // Merlin Properties
+    "PLATPRT00018": "APR.WA",    
+    "US79466L3024": "CRM",       
+    "NL0010273215": "ASML.AS",   
+    "NL0009805522": "NBIS",      
+    "US78409V1044": "SPGI",      
+    "US01609W1027": "BABA",      
+    "LU1681048630": "GLUX.PA",   
+    "US68236H2040": "ONDS",      
+    "US6877931096": "OSCR",      
+    "GB0002875804": "BATS.L",    
+    "IE00BK5BZS07": "AAP3.L",    
+    "IE00B8K7KM88": "3USS.MI",   
+    "CA55027C1068": "LMN.V",     
+    "US92826C8394": "V",         
+    "IE00B7Y34M31": "3USL.L",    
+    "GB0006215205": "MCG.L",     
+    "AU000000KPG7": "KPG.AX",    
+    "US17253J1060": "CIFR",      
+    "IE00BK5BZQ82": "AMZ3.L",    
+    "US5835433013": "SLNH",      
+    "US57636Q1040": "MA",        
+    "CA50077N1024": "PNG.V",     
+    "US0258161092": "AXP",       
+    "FR0000072597": "ALITL.PA",  
+    "US2473617023": "DAL",       
+    "DE0007236101": "SIE.DE",    
+    "AU0000109159": "DUR.AX",    
+    "US3927091013": "GRBK",      
+    "IE00BMC38736": "SMH.L",     
+    "GB00B3FBWW43": "SDI.L",     
+    "US0970231058": "BA",        
+    "CH1134540470": "ONON",      
+    "US85208M1027": "SFM",       
+    "US1912161007": "KO",        
+    "US70450Y1038": "PYPL",      
+    "IE00B3XXRP09": "VUSA.L",    
+    "IE0001827041": "CRH",       
+    "US7170811035": "PFE",       
+    "CA82509L1076": "SHOP",      
+    "FI4000391487": "RELAIS.HE", 
+    "IE00B60SX394": "SC0J.DE",   
+    "US8522341036": "XYZ",       
+    "ES0105025003": "MRL.MC",    
     "US0378331005": "AAPL",
     "US88160R1014": "TSLA",
     "US02079K3059": "GOOGL",
@@ -126,7 +123,7 @@
     "US67066G1040": "NVDA",
   };
 
-  const cache = new Map(); // key -> Promise<Map dayKey->close>
+  const cache = new Map(); 
 
   async function fetchJSON(url) {
     let lastErr;
@@ -146,18 +143,19 @@
   DG.fetchYahooSeries = async function (symbol, fromDate) {
     const key = "y:" + symbol;
     if (cache.has(key)) return cache.get(key);
+    
     const p1 = Math.floor(fromDate.getTime() / 1000) - 86400 * 7;
     const p2 = Math.floor(Date.now() / 1000) + 86400;
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&events=div%2Csplit`;
+    
     const promise = fetchJSON(url).then(j => {
       const r = j.chart && j.chart.result && j.chart.result[0];
       if (!r || !r.timestamp) throw new Error("sin datos para " + symbol);
+      
       const closes = r.indicators.quote[0].close;
       const map = new Map();
       const meta = { currency: (r.meta && r.meta.currency) || "USD" };
-      // Yahoo devuelve precios ajustados por splits, pero las cantidades del
-      // extracto son las reales de cada momento. Des-ajustamos: precio real =
-      // precio ajustado × factor de splits posteriores a esa fecha.
+      
       const splits = [];
       if (r.events && r.events.splits) {
         for (const s of Object.values(r.events.splits)) {
@@ -166,11 +164,13 @@
         }
         splits.sort((a, b) => (a.day < b.day ? -1 : 1));
       }
+      
       const factorAfter = day => {
         let f = 1;
         for (const s of splits) if (s.day > day) f *= s.f;
         return f;
       };
+      
       r.timestamp.forEach((t, i) => {
         const c = closes[i];
         if (c != null) {
@@ -178,16 +178,21 @@
           map.set(day, c * (splits.length ? factorAfter(day) : 1));
         }
       });
-      // El histórico diario suele traer null en la sesión más reciente:
-      // usar el precio de mercado actual (meta) para el día de hoy
+      
       if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
         const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
         map.set(day, r.meta.regularMarketPrice);
       }
       return { map, meta };
+      
+    }).catch(e => {
+      // CORRECCIÓN: Si falla la conexión o Yahoo no tiene el ticker, devolvemos un mapa vacío 
+      // en lugar de lanzar un error. Esto obliga al código principal a usar el fallback (el precio de compra).
+      console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Activando salvavidas (fallback).", e);
+      return { map: new Map(), meta: {} };
     });
+
     cache.set(key, promise);
-    promise.catch(() => cache.delete(key));
     return promise;
   };
 
@@ -201,11 +206,11 @@
     } catch { return null; }
   };
 
-  /** Serie FX: cierres de EURUSD=X etc. Map dayKey -> unidades de divisa por 1 EUR. */
+  /** Serie FX: cierres de EURUSD=X etc. */
   DG.fetchFxSeries = async function (cur, fromDate) {
     if (cur === "EUR") return null;
     const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
-    return map;
+    return map; // Aunque falle Yahoo, devolverá el Map vacío, evitando colapsos
   };
 
   /** Valor en una serie para un día, retrocediendo hasta 10 días si no cotiza. */
@@ -221,20 +226,14 @@
     return null;
   };
 
-  /**
-   * Valida una serie de Yahoo contra los precios de las operaciones reales
-   * del usuario (misma divisa). Si Yahoo difiere por un factor constante
-   * (típico en consolidaciones no publicadas, p.ej. 100:1), re-escala la
-   * serie. Si difiere de forma incoherente, la descarta (se usará fallback).
-   * @returns {"ok"|"rescaled"|"rejected"}
-   */
+  /** Valida una serie de Yahoo contra los precios de las operaciones reales. */
   DG.validateAgainstTrades = function (pp, tradePoints) {
     if (!pp || pp.kind !== "yahoo" || !tradePoints || !tradePoints.length) return "ok";
     let yCur = pp.meta.currency || "USD";
     const gbp = yCur === "GBp";
     const ratios = [];
     for (const t of tradePoints) {
-      if (t.cur !== (gbp ? "GBP" : yCur)) continue; // sin FX no comparamos
+      if (t.cur !== (gbp ? "GBP" : yCur)) continue;
       let y = DG.seriesAt(pp.map, DG.dayKey(t.date));
       if (y == null || !t.price) continue;
       if (gbp) y = y / 100;
@@ -243,8 +242,7 @@
     if (ratios.length < 1) return "ok";
     ratios.sort((a, b) => a - b);
     const med = ratios[Math.floor(ratios.length / 2)];
-    if (med > 0.67 && med < 1.5) return "ok"; // diferencia normal (horas de cierre, etc.)
-    // ¿factor constante? -> re-escalar
+    if (med > 0.67 && med < 1.5) return "ok"; 
     const spread = ratios[ratios.length - 1] / ratios[0];
     if (spread < 1.6) {
       for (const [k, v] of pp.map) pp.map.set(k, v / med);

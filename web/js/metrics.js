@@ -175,6 +175,35 @@
     return rows;
   };
 
+  /**
+   * Métricas del rango de fechas filtrado: TWR del periodo y XIRR tratando
+   * el valor de la cartera al inicio del rango como aportación inicial.
+   */
+  DG.rangeMetrics = function (series, twr, flows, range) {
+    const pts = series.filter(p => p.day >= range.from && p.day <= range.to);
+    if (pts.length < 2) return null;
+    const first = pts[0], last = pts[pts.length - 1];
+
+    // TWR del rango (re-basado)
+    const tw = twr.filter(p => p.day >= range.from && p.day <= range.to);
+    const twrPeriod = tw.length >= 2 ? tw[tw.length - 1].index / tw[0].index - 1 : null;
+
+    // XIRR del rango: "compras" toda la cartera el primer día por su valor
+    const dFrom = new Date(first.day + "T00:00:00Z");
+    const dTo = new Date(last.day + "T00:00:00Z");
+    const rangeFlows = [{ date: dFrom, amount: first.value }];
+    for (const f of flows) {
+      const k = DG.dayKey(f.date);
+      if (k > first.day && k <= last.day) rangeFlows.push(f);
+    }
+    const irr = DG.xirr(rangeFlows, last.value, dTo);
+    const years = (dTo - dFrom) / (365.25 * 86400e3);
+    // rentabilidad money-weighted del periodo sin anualizar
+    const periodMoney = (irr != null && years > 0) ? Math.pow(1 + irr, years) - 1 : null;
+
+    return { twrPeriod, xirr: irr, periodMoney, years, startValue: first.value, endValue: last.value };
+  };
+
   /** Serie mensual: aportación neta acumulada vs valor de cartera. */
   DG.buildMoneySeries = function (series, flows) {
     const byMonth = new Map(); // 'YYYY-MM' -> {net, value(último día del mes)}

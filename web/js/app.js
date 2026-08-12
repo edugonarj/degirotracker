@@ -154,12 +154,12 @@
       { label: "Valor de la cartera", value: EUR.format(last.value), sub: "efectivo: " + EUR.format(last.cash) },
       { label: "Aportado neto", value: EUR0.format(netDeposits), sub: `ingresos ${EUR0.format(st.totals.deposits)} · retiradas ${EUR0.format(-st.totals.withdrawals)}` },
       { label: "Ganancia total", value: EUR0.format(totalGain), cls: totalGain >= 0 ? "pos" : "neg", sub: PCT(netDeposits > 0 ? totalGain / netDeposits : null) + " sobre aportado" },
-      { label: "Rentabilidad anualizada", value: irr != null ? PCT(irr) : "—", cls: (irr ?? 0) >= 0 ? "pos" : "neg", sub: "XIRR (ponderada por dinero)" },
-      { label: "Rentabilidad acumulada", value: PCT(twrTotal), cls: twrTotal >= 0 ? "pos" : "neg", sub: "TWR (comparable con índices)" },
+      { id: "cardXirr", label: "Rentabilidad anualizada", value: irr != null ? PCT(irr) : "—", cls: (irr ?? 0) >= 0 ? "pos" : "neg", sub: "XIRR (ponderada por dinero)" },
+      { id: "cardTwr", label: "Rentabilidad acumulada", value: PCT(twrTotal), cls: twrTotal >= 0 ? "pos" : "neg", sub: "TWR (comparable con índices)" },
       { label: "Dividendos + préstamo", value: EUR0.format(st.totals.dividendsEUR + st.totals.lendingEUR), sub: "comisiones: " + EUR0.format(st.totals.fees) },
     ];
     $("summaryCards").innerHTML = cards.map(c =>
-      `<div class="card"><div class="label">${c.label}</div><div class="value ${c.cls || ""}">${c.value}</div><div class="sub">${c.sub || ""}</div></div>`
+      `<div class="card"${c.id ? ` id="${c.id}"` : ""}><div class="label">${c.label}</div><div class="value ${c.cls || ""}">${c.value}</div><div class="sub">${c.sub || ""}</div></div>`
     ).join("");
 
     renderBenchToggles();
@@ -199,6 +199,36 @@
     DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range);
     // el gráfico de dinero comparte el mismo rango de fechas
     DG.renderMoneyChart(ctx.moneySeries, ctx.range);
+    updateRangeCards();
+  }
+
+  /** Recalcula las tarjetas de rentabilidad para el rango filtrado. */
+  function updateRangeCards() {
+    const m = DG.rangeMetrics(ctx.valueSeries, ctx.twr, ctx.state.flows, ctx.range);
+    const isFull = ctx.range.from === ctx.valueSeries[0].day &&
+                   ctx.range.to === ctx.valueSeries[ctx.valueSeries.length - 1].day;
+    const rangeTxt = isFull ? "" : ` · ${ctx.range.from} → ${ctx.range.to}`;
+    if (!m) return;
+
+    const setCard = (id, value, cls, sub) => {
+      const el = $(id);
+      if (!el) return;
+      el.querySelector(".value").textContent = value;
+      el.querySelector(".value").className = "value " + cls;
+      el.querySelector(".sub").textContent = sub;
+    };
+
+    // XIRR: anualizada si el rango ≥ 1 año; si es menor, del periodo sin
+    // anualizar (anualizar rangos cortos infla el número y confunde)
+    if (m.years >= 1) {
+      setCard("cardXirr", m.xirr != null ? PCT(m.xirr) : "—", (m.xirr ?? 0) >= 0 ? "pos" : "neg",
+        "XIRR anualizada" + rangeTxt);
+    } else {
+      setCard("cardXirr", m.periodMoney != null ? PCT(m.periodMoney) : "—", (m.periodMoney ?? 0) >= 0 ? "pos" : "neg",
+        "del periodo, sin anualizar" + rangeTxt);
+    }
+    setCard("cardTwr", m.twrPeriod != null ? PCT(m.twrPeriod) : "—", (m.twrPeriod ?? 0) >= 0 ? "pos" : "neg",
+      "TWR (comparable con índices)" + rangeTxt);
   }
 
   // rangos

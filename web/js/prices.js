@@ -178,6 +178,12 @@
           map.set(day, c * (splits.length ? factorAfter(day) : 1));
         }
       });
+      // El histórico diario suele traer null en la sesión más reciente:
+      // usar el precio de mercado actual (meta) para el día de hoy
+      if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
+        const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
+        map.set(day, r.meta.regularMarketPrice);
+      }
       return { map, meta };
     });
     cache.set(key, promise);

@@ -119,7 +119,8 @@
       data: { datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
+        // CORRECCIÓN: Agrupar tooltips estrictamente por el valor del eje X, no por posición del índice
+        interaction: { mode: "x", intersect: false },
         scales: {
           x: { type: "time", time: { unit: "month", tooltipFormat: "dd MMM yyyy" }, grid: { display: false } },
           y: { ticks: { callback: v => v.toFixed(0) }, title: { display: true, text: "Base 100" } },

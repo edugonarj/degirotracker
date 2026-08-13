@@ -35,7 +35,9 @@
     if (!pts.length) return;
 
     const base = pts[0].index;
-    const yByDay = new Map(pts.map(p => [p.day, (p.index / base) * 100]));
+    
+    // Mapa para saber en qué índice (0, 1, 2...) del array cae cada fecha exacta
+    const dayToIndex = new Map(pts.map((p, i) => [p.day, i]));
 
     const userData = pts.map(p => ({ 
       x: new Date(p.day + "T00:00:00Z").getTime(), 
@@ -50,52 +52,57 @@
       borderWidth: 2.5, pointRadius: 0, fill: true, tension: .1,
     }];
 
-    const buyData = [];
-    const sellData = [];
+    // Rellenamos de 'null' para que los índices coincidan milimétricamente con la línea de la cartera
+    const buyData = new Array(pts.length).fill(null);
+    const sellData = new Array(pts.length).fill(null);
     const tickersInView = new Set();
 
     for (const ev of events) {
       if (ev.type === "trade" && ev.date) {
         const day = DG.dayKey(ev.date);
         
-        if (day >= range.from && day <= range.to && yByDay.has(day)) {
+        // Si el día de la operación existe en el rango visible
+        if (dayToIndex.has(day)) {
+          const idx = dayToIndex.get(day); // Obtenemos el índice exacto del día
+          const yVal = userData[idx].y; 
+          
           const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
           tickersInView.add(ticker);
 
           if (DG.tradeFilters.hidden.has(ticker)) continue;
 
-          const yVal = yByDay.get(day); 
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
           const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           const action = ev.side === 1 ? "Compra" : "Venta";
           
           const desc = `${action} de ${ticker}, ${qty}x$${price}`;
+          const pt = { x: userData[idx].x, y: yVal, desc: desc };
 
-          const pt = { 
-            x: new Date(day + "T00:00:00Z").getTime(), 
-            y: yVal, 
-            desc: desc 
-          };
-          
-          if (ev.side === 1) buyData.push(pt);
-          else sellData.push(pt);
+          // Si hay varias operaciones el mismo día, concatenamos el texto en el mismo índice
+          if (ev.side === 1) {
+            if (buyData[idx]) buyData[idx].desc += " | " + desc;
+            else buyData[idx] = pt;
+          } else {
+            if (sellData[idx]) sellData[idx].desc += " | " + desc;
+            else sellData[idx] = pt;
+          }
         }
       }
     }
 
-    if (buyData.length > 0) {
+    if (buyData.some(d => d !== null)) {
       datasets.push({
-        label: "Compras", data: buyData, type: "scatter", xAxisID: "x",
+        label: "Compras", data: buyData, type: "line", showLine: false,
         backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5,
-        pointRadius: 5, pointHoverRadius: 7, order: 0 
+        pointRadius: ctx => ctx.raw ? 5 : 0, pointHoverRadius: ctx => ctx.raw ? 7 : 0, order: 0 
       });
     }
 
-    if (sellData.length > 0) {
+    if (sellData.some(d => d !== null)) {
       datasets.push({
-        label: "Ventas", data: sellData, type: "scatter", xAxisID: "x",
+        label: "Ventas", data: sellData, type: "line", showLine: false,
         backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5,
-        pointRadius: 5, pointHoverRadius: 7, order: 0
+        pointRadius: ctx => ctx.raw ? 5 : 0, pointHoverRadius: ctx => ctx.raw ? 7 : 0, order: 0
       });
     }
 
@@ -103,10 +110,12 @@
       if (!visible.has(id) || !b.map) continue;
       const start = DG.seriesAt(b.map, pts[0].day);
       if (!start) continue;
+      
       const data = [];
       for (const p of pts) {
         const v = DG.seriesAt(b.map, p.day);
         if (v != null) data.push({ x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 });
+        else data.push(null); // Conservamos el 'null' para no descuadrar los índices de los benchmarks
       }
       datasets.push({
         label: b.label, data, borderColor: b.color,
@@ -119,8 +128,8 @@
       data: { datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        // CORRECCIÓN: Agrupar tooltips estrictamente por el valor del eje X, no por posición del índice
-        interaction: { mode: "x", intersect: false },
+        // Al alinear los arrays con nulls, el modo 'index' funciona perfectamente
+        interaction: { mode: "index", intersect: false },
         scales: {
           x: { type: "time", time: { unit: "month", tooltipFormat: "dd MMM yyyy" }, grid: { display: false } },
           y: { ticks: { callback: v => v.toFixed(0) }, title: { display: true, text: "Base 100" } },

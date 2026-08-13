@@ -11,8 +11,17 @@
 
   const EUR = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
-  // Estado global para los filtros de operaciones en el gráfico
-  DG.tradeFilters = DG.tradeFilters || { showAny: true, hidden: new Set() };
+  // Estado global para los filtros de operaciones
+  DG.tradeFilters = DG.tradeFilters || { hidden: new Set(), dropdownOpen: false };
+
+  // Listener global para cerrar el dropdown si se hace clic fuera de él
+  document.addEventListener("click", (e) => {
+    const dropdown = document.getElementById("tradeDropdown");
+    if (dropdown && !dropdown.contains(e.target)) {
+      dropdown.classList.remove("open");
+      DG.tradeFilters.dropdownOpen = false;
+    }
+  });
 
   /**
    * @param twr [{day,index}] serie del usuario
@@ -53,7 +62,8 @@
           const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
           tickersInView.add(ticker);
 
-          if (!DG.tradeFilters.showAny || DG.tradeFilters.hidden.has(ticker)) continue;
+          // Si el ticker está oculto en el filtro, saltamos
+          if (DG.tradeFilters.hidden.has(ticker)) continue;
 
           const yVal = yByDay.get(day); 
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
@@ -140,56 +150,90 @@
     perfChart = new Chart(ctxCanvas, cfg);
     ctxCanvas.ondblclick = () => perfChart.resetZoom();
 
-    renderTradeToggles(tickersInView, twr, benchSeries, visible, range, events);
+    // Renderizar el menú desplegable dinámicamente
+    renderTradeDropdown(tickersInView, twr, benchSeries, visible, range, events);
   };
 
   /**
-   * Genera los botones para encender/apagar puntos de compra y venta.
+   * Genera el menú desplegable (dropdown) de checkboxes para filtrar tickers.
    */
-  function renderTradeToggles(tickers, twr, benchSeries, visible, range, events) {
-    let container = document.getElementById("tradeToggles");
+  function renderTradeDropdown(tickers, twr, benchSeries, visible, range, events) {
+    let container = document.getElementById("tradeFiltersContainer");
     
-    // Si no existe, lo inyectamos dinámicamente debajo de benchToggles
+    // Inyectarlo debajo de los botones de índices si no existe
     if (!container) {
       container = document.createElement("div");
-      container.id = "tradeToggles";
-      container.className = "bench-toggles";
-      container.style.marginTop = "8px";
+      container.id = "tradeFiltersContainer";
+      container.className = "trade-filters-container";
       const benchDiv = document.getElementById("benchToggles");
       if (benchDiv) benchDiv.parentNode.insertBefore(container, benchDiv.nextSibling);
     }
     
-    container.innerHTML = "";
-    if (tickers.size === 0) return;
+    if (tickers.size === 0) {
+      container.innerHTML = "";
+      return;
+    }
 
-    // Botón Bulk
-    const bulkBtn = document.createElement("div");
-    bulkBtn.className = "toggle" + (DG.tradeFilters.showAny ? "" : " off");
-    bulkBtn.innerHTML = `<span class="dot" style="background:#1c2b3a"></span>Mostrar Operaciones`;
-    bulkBtn.onclick = () => {
-      DG.tradeFilters.showAny = !DG.tradeFilters.showAny;
+    const tickerArray = Array.from(tickers).sort();
+    const visibleCount = tickerArray.filter(t => !DG.tradeFilters.hidden.has(t)).length;
+
+    // Crear la estructura HTML del menú desplegable
+    container.innerHTML = `
+      <div class="custom-dropdown ${DG.tradeFilters.dropdownOpen ? 'open' : ''}" id="tradeDropdown">
+        <button class="dropdown-btn" id="tradeDropdownBtn">
+          <span class="dot" style="background:#1c2b3a"></span>
+          Filtro operaciones: ${visibleCount}/${tickerArray.length} visibles ▼
+        </button>
+        <div class="dropdown-content" id="tradeDropdownContent">
+          <div class="dropdown-actions">
+            <button id="btnMarcarTodas">Marcar todas</button>
+            <button id="btnDesmarcarTodas">Limpiar</button>
+          </div>
+          <div id="dropdownList"></div>
+        </div>
+      </div>
+    `;
+
+    // Botón para abrir/cerrar
+    document.getElementById("tradeDropdownBtn").onclick = (e) => {
+      e.stopPropagation();
+      DG.tradeFilters.dropdownOpen = !DG.tradeFilters.dropdownOpen;
+      document.getElementById("tradeDropdown").classList.toggle("open", DG.tradeFilters.dropdownOpen);
+    };
+
+    // Acciones globales
+    document.getElementById("btnMarcarTodas").onclick = (e) => {
+      e.stopPropagation();
+      DG.tradeFilters.hidden.clear();
       DG.renderPerfChart(twr, benchSeries, visible, range, events);
     };
-    container.appendChild(bulkBtn);
 
-    // Botones Individuales (se ocultan si el Bulk está desactivado)
-    if (DG.tradeFilters.showAny) {
-      Array.from(tickers).sort().forEach(ticker => {
-        const btn = document.createElement("div");
-        const isHidden = DG.tradeFilters.hidden.has(ticker);
-        btn.className = "toggle" + (isHidden ? " off" : "");
-        btn.innerHTML = `<span class="dot" style="background:#6b7a89"></span>${ticker}`;
-        btn.onclick = () => {
-          if (isHidden) {
-            DG.tradeFilters.hidden.delete(ticker);
-          } else {
-            DG.tradeFilters.hidden.add(ticker);
-          }
-          DG.renderPerfChart(twr, benchSeries, visible, range, events);
-        };
-        container.appendChild(btn);
-      });
-    }
+    document.getElementById("btnDesmarcarTodas").onclick = (e) => {
+      e.stopPropagation();
+      tickerArray.forEach(t => DG.tradeFilters.hidden.add(t));
+      DG.renderPerfChart(twr, benchSeries, visible, range, events);
+    };
+
+    // Rellenar la lista de checkboxes
+    const list = document.getElementById("dropdownList");
+    tickerArray.forEach(ticker => {
+      const isChecked = !DG.tradeFilters.hidden.has(ticker);
+      const label = document.createElement("label");
+      label.className = "dropdown-item";
+      label.innerHTML = `<input type="checkbox" ${isChecked ? "checked" : ""}> ${ticker}`;
+      
+      const checkbox = label.querySelector("input");
+      checkbox.onchange = (e) => {
+        if (e.target.checked) {
+          DG.tradeFilters.hidden.delete(ticker);
+        } else {
+          DG.tradeFilters.hidden.add(ticker);
+        }
+        DG.renderPerfChart(twr, benchSeries, visible, range, events);
+      };
+      
+      list.appendChild(label);
+    });
   }
 
   /**

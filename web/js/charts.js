@@ -35,13 +35,13 @@
     if (!pts.length) return;
 
     const base = pts[0].index;
-    
-    // Mapa para saber en qué índice (0, 1, 2...) del array cae cada fecha exacta
-    const dayToIndex = new Map(pts.map((p, i) => [p.day, i]));
 
+    // 1. Preparar línea principal y vincularla a la búsqueda temporal
+    // Añadimos un array "trades" vacío a cada día para rellenarlo después
     const userData = pts.map(p => ({ 
       x: new Date(p.day + "T00:00:00Z").getTime(), 
-      y: (p.index / base) * 100 
+      y: (p.index / base) * 100,
+      trades: [] 
     }));
 
     const datasets = [{
@@ -52,20 +52,20 @@
       borderWidth: 2.5, pointRadius: 0, fill: true, tension: .1,
     }];
 
-    // Rellenamos de 'null' para que los índices coincidan milimétricamente con la línea de la cartera
-    const buyData = new Array(pts.length).fill(null);
-    const sellData = new Array(pts.length).fill(null);
+    const buyData = [];
+    const sellData = [];
     const tickersInView = new Set();
 
     for (const ev of events) {
       if (ev.type === "trade" && ev.date) {
         const day = DG.dayKey(ev.date);
+        const tradeTime = new Date(day + "T00:00:00Z").getTime();
         
-        // Si el día de la operación existe en el rango visible
-        if (dayToIndex.has(day)) {
-          const idx = dayToIndex.get(day); // Obtenemos el índice exacto del día
-          const yVal = userData[idx].y; 
-          
+        // Comprobar si la operación está dentro del rango visible del gráfico
+        const fromTime = new Date(range.from + "T00:00:00Z").getTime();
+        const toTime = new Date(range.to + "T00:00:00Z").getTime();
+        
+        if (tradeTime >= fromTime && tradeTime <= toTime) {
           const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
           tickersInView.add(ticker);
 
@@ -74,35 +74,46 @@
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
           const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           const action = ev.side === 1 ? "Compra" : "Venta";
-          
           const desc = `${action} de ${ticker}, ${qty}x$${price}`;
-          const pt = { x: userData[idx].x, y: yVal, desc: desc };
 
-          // Si hay varias operaciones el mismo día, concatenamos el texto en el mismo índice
-          if (ev.side === 1) {
-            if (buyData[idx]) buyData[idx].desc += " | " + desc;
-            else buyData[idx] = pt;
-          } else {
-            if (sellData[idx]) sellData[idx].desc += " | " + desc;
-            else sellData[idx] = pt;
+          // MAGIA AQUÍ: Encontrar el día de cotización más cercano en userData 
+          // (Si compraste en sábado, se ajusta al viernes o lunes automáticamente)
+          let closestIdx = 0;
+          let minDiff = Infinity;
+          for (let i = 0; i < userData.length; i++) {
+             const diff = Math.abs(userData[i].x - tradeTime);
+             if (diff < minDiff) {
+                minDiff = diff;
+                closestIdx = i;
+             }
+             if (userData[i].x > tradeTime) break; // Optimización (la lista está ordenada)
           }
+          
+          const snapPt = userData[closestIdx];
+          snapPt.trades.push(desc); // Inyectamos el texto de la compra DENTRO del punto de la línea azul
+
+          // Crear el punto visual exactamente en la misma coordenada que la línea sin dejar espacios nulos
+          const pt = { x: snapPt.x, y: snapPt.y };
+          
+          if (ev.side === 1) buyData.push(pt);
+          else sellData.push(pt);
         }
       }
     }
 
-    if (buyData.some(d => d !== null)) {
+    if (buyData.length > 0) {
       datasets.push({
-        label: "Compras", data: buyData, type: "line", showLine: false,
+        label: "Compras", data: buyData, type: "scatter", xAxisID: "x",
         backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5,
-        pointRadius: ctx => ctx.raw ? 5 : 0, pointHoverRadius: ctx => ctx.raw ? 7 : 0, order: 0 
+        pointRadius: 5, pointHoverRadius: 7, order: 0 
       });
     }
 
-    if (sellData.some(d => d !== null)) {
+    if (sellData.length > 0) {
       datasets.push({
-        label: "Ventas", data: sellData, type: "line", showLine: false,
+        label: "Ventas", data: sellData, type: "scatter", xAxisID: "x",
         backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5,
-        pointRadius: ctx => ctx.raw ? 5 : 0, pointHoverRadius: ctx => ctx.raw ? 7 : 0, order: 0
+        pointRadius: 5, pointHoverRadius: 7, order: 0
       });
     }
 
@@ -110,12 +121,10 @@
       if (!visible.has(id) || !b.map) continue;
       const start = DG.seriesAt(b.map, pts[0].day);
       if (!start) continue;
-      
       const data = [];
       for (const p of pts) {
         const v = DG.seriesAt(b.map, p.day);
         if (v != null) data.push({ x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 });
-        else data.push(null); // Conservamos el 'null' para no descuadrar los índices de los benchmarks
       }
       datasets.push({
         label: b.label, data, borderColor: b.color,
@@ -128,8 +137,8 @@
       data: { datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        // Al alinear los arrays con nulls, el modo 'index' funciona perfectamente
-        interaction: { mode: "index", intersect: false },
+        // Buscamos estrictamente por coordenadas en el eje X
+        interaction: { mode: "x", intersect: false },
         scales: {
           x: { type: "time", time: { unit: "month", tooltipFormat: "dd MMM yyyy" }, grid: { display: false } },
           y: { ticks: { callback: v => v.toFixed(0) }, title: { display: true, text: "Base 100" } },
@@ -137,12 +146,21 @@
         plugins: {
           legend: { display: false },
           tooltip: {
+            // Filtramos los puntos sueltos para que el tooltip SÓLO se lea de las líneas continuas
+            filter: function(tooltipItem) {
+              return tooltipItem.dataset.type !== "scatter";
+            },
             callbacks: {
               label: ctx => {
-                if (ctx.raw && ctx.raw.desc) {
-                  return ` ${ctx.raw.desc}`;
+                const labelStr = ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`;
+                
+                // Si estamos leyendo la línea de tu Cartera (Index 0) y hemos inyectado operaciones...
+                if (ctx.datasetIndex === 0 && ctx.raw && ctx.raw.trades && ctx.raw.trades.length > 0) {
+                  // Devolvemos un array: la primera línea es la rentabilidad, las siguientes son las operaciones
+                  return [labelStr, ...ctx.raw.trades.map(t => `   • ${t}`)];
                 }
-                return ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`;
+                
+                return labelStr;
               }
             },
           },

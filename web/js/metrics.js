@@ -90,7 +90,7 @@
   };
 
   /**
-   * TWR diaria encadenada, neutralizando flujos externos con lógica asimétrica.
+   * TWR diaria encadenada, neutralizando flujos externos con lógica simétrica.
    */
   DG.buildTWR = function (series, flows) {
     const flowByDay = new Map();
@@ -105,22 +105,14 @@
       if (prev !== null) {
         const flow = flowByDay.get(pt.day) || 0;
         
-        if (flow > 0) {
-          // Depósito: Asumimos que entra al inicio del día
-          const base = prev + flow;
-          if (base > 1e-9) {
-            idx *= pt.value / base;
-          }
-        } else if (flow < 0) {
-          // Retirada: Asumimos que sale al final del día
-          if (prev > 1e-9) {
-            idx *= (pt.value - flow) / prev;
-          }
-        } else {
-          // Día normal sin movimientos
-          if (prev > 1e-9) {
-            idx *= pt.value / prev;
-          }
+        // Tratamos los depósitos (flow > 0) y retiradas (flow < 0) igual.
+        // Asumimos que el movimiento de capital se efectúa al inicio del día.
+        // Así, la base sobre la que se calcula la rentabilidad del día actual
+        // ya incluye (o descuenta) el capital movido.
+        const base = prev + flow; 
+        
+        if (base > 1e-9) {
+          idx *= pt.value / base;
         }
       }
       out.push({ day: pt.day, index: idx });

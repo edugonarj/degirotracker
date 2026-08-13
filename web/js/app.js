@@ -17,6 +17,7 @@
     benchSeries: new Map(), visibleBench: new Set(),
     priceProviders: new Map(), fxSeries: new Map(),
     productRows: [], range: null, warnings: [],
+    events: [] // <-- ALMACÉN NUEVO PARA LAS COMPRAS/VENTAS
   };
 
   // ---------- carga de archivo ----------
@@ -43,6 +44,8 @@
       const buf = await file.arrayBuffer();
       const { events, warnings } = DG.parseAccountFile(buf);
       ctx.warnings = warnings;
+      ctx.events = events; // Guardamos los eventos puros para el gráfico
+      
       log(`${events.length} movimientos leídos. Reconstruyendo cartera…`);
       ctx.state = DG.replay(events);
 
@@ -65,13 +68,11 @@
     const st = ctx.state;
     const from = st.firstDate;
 
-    // divisas necesarias
     const fxJobs = [...st.currencies].filter(c => c !== "EUR").map(async c => {
       try { ctx.fxSeries.set(c, await DG.fetchFxSeries(c, from)); }
       catch { ctx.warnings.push("Sin serie FX para " + c); }
     });
 
-    // benchmarks
     const benchJobs = DG.BENCHMARKS.map(async b => {
       try {
         const { map } = await DG.fetchYahooSeries(b.symbol, from);
@@ -83,7 +84,6 @@
       }
     });
 
-    // productos: los que han tenido posición en algún momento
     const isins = [...st.products.keys()];
     const prodJobs = isins.map(async isin => {
       const fbPoints = st.tradePricePoints.get(isin) || [];
@@ -95,8 +95,6 @@
         try {
           const { map, meta } = await DG.fetchYahooSeries(symbol, from);
           const pp = { kind: "yahoo", map, meta, fb };
-          // Validar la serie contra tus propios precios de operaciones:
-          // detecta tickers con escala errónea (consolidaciones) o equivocados
           const verdict = DG.validateAgainstTrades(pp, fbPoints);
           if (verdict === "rejected") {
             if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
@@ -108,7 +106,7 @@
           }
           ctx.priceProviders.set(isin, pp);
           return;
-        } catch { /* fallback below */ }
+        } catch { }
       }
       if (fb) {
         ctx.priceProviders.set(isin, { kind: "fallback", fb });
@@ -144,11 +142,8 @@
     const valuationDate = new Date(last.day + "T00:00:00Z");
     const netDeposits = st.totals.deposits + st.totals.withdrawals;
     const totalGain = last.value - netDeposits;
-    const twrTotal = ctx.twr[ctx.twr.length - 1].index / 100 - 1;
-    const irr = DG.xirr(st.flows, last.value, valuationDate);
-
-    $("topbarInfo").textContent =
-      `${DG.dayKey(st.firstDate)} → ${last.day} · ${st.products.size} productos`;
+    
+    $("topbarInfo").textContent = `${DG.dayKey(st.firstDate)} → ${last.day} · ${st.products.size} productos`;
 
     const cards = [
       { label: "Valor de la cartera", value: EUR.format(last.value), sub: "efectivo: " + EUR.format(last.cash) },
@@ -192,17 +187,15 @@
       }
       el.appendChild(div);
     }
-    // toggle de la propia cartera no: siempre visible
   }
 
   function drawPerf() {
-    DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range);
-    // el gráfico de dinero comparte el mismo rango de fechas
+    // AHORA PASAMOS ctx.events AL GRÁFICO
+    DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range, ctx.events);
     DG.renderMoneyChart(ctx.moneySeries, ctx.range);
     updateRangeCards();
   }
 
-  /** Recalcula las tarjetas de rentabilidad para el rango filtrado. */
   function updateRangeCards() {
     const m = DG.rangeMetrics(ctx.valueSeries, ctx.twr, ctx.state.flows, ctx.range);
     const isFull = ctx.range.from === ctx.valueSeries[0].day &&
@@ -218,8 +211,6 @@
       el.querySelector(".sub").textContent = sub;
     };
 
-    // Anualizada en grande, acumulada en pequeño. Si el rango es <1 año,
-    // se muestra la del periodo en grande (anualizar rangos cortos confunde).
     const twrAnnual = (m.twrPeriod != null && m.years >= 1 && m.twrPeriod > -1)
       ? Math.pow(1 + m.twrPeriod, 1 / m.years) - 1 : null;
 
@@ -236,7 +227,6 @@
     }
   }
 
-  // rangos
   document.querySelectorAll("#presetBtns button").forEach(btn => {
     btn.onclick = () => {
       document.querySelectorAll("#presetBtns button").forEach(b => b.classList.remove("active"));
@@ -271,7 +261,6 @@
   $("rangeStart").addEventListener("change", onCustomRange);
   $("rangeEnd").addEventListener("change", onCustomRange);
 
-  // tabla
   let currentTab = "open";
   function renderTable(tab) {
     currentTab = tab;

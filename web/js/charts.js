@@ -16,14 +16,18 @@
    * @param benchSeries Map id -> {label,color,map} (Map dayKey->close)
    * @param visible Set de ids visibles
    * @param range {from,to} dayKeys
+   * @param events [] Movimientos en bruto para dibujar compras/ventas
    */
-  DG.renderPerfChart = function (twr, benchSeries, visible, range) {
+  DG.renderPerfChart = function (twr, benchSeries, visible, range, events = []) {
     const pts = twr.filter(p => p.day >= range.from && p.day <= range.to);
     if (!pts.length) return;
 
     // Re-basar el TWR del usuario a 100 al inicio del rango
     const base = pts[0].index;
     const userData = pts.map(p => ({ x: p.day, y: (p.index / base) * 100 }));
+    
+    // Diccionario rápido para saber qué altura (Y) tenía la cartera en cada día (X)
+    const yByDay = new Map(userData.map(d => [d.x, d.y]));
 
     const datasets = [{
       label: "Mi cartera",
@@ -32,6 +36,56 @@
       backgroundColor: "rgba(0,159,223,.08)",
       borderWidth: 2.5, pointRadius: 0, fill: true, tension: .1,
     }];
+
+    // --- PROCESAMIENTO DE COMPRAS Y VENTAS PARA PINTAR PUNTOS ---
+    const buyData = [];
+    const sellData = [];
+
+    for (const ev of events) {
+      if (ev.type === "trade" && ev.date) {
+        const day = DG.dayKey(ev.date);
+        
+        // Solo dibujamos los puntos si están dentro del rango de fechas que miramos
+        if (day >= range.from && day <= range.to && yByDay.has(day)) {
+          const yVal = yByDay.get(day); // Altura exacta de la línea ese día
+          const qty = Math.abs(ev.qty).toLocaleString("es-ES");
+          const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+          const cur = ev.tradeCur || "EUR";
+          const action = ev.side === 1 ? "Compra" : "Venta";
+          
+          // Intentar sacar el Ticker (ej: ASTS) desde el ISIN, si no, usa el propio ISIN
+          const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
+          const product = ev.product || "Desconocido";
+
+          // Texto exacto para el Tooltip
+          const desc = `${action} de ${product}, ${qty}x$${price}. Tipo: ${ticker}`;
+
+          const pt = { x: day, y: yVal, desc: desc };
+          
+          if (ev.side === 1) buyData.push(pt);
+          else sellData.push(pt);
+        }
+      }
+    }
+
+    // Dibujar puntos verdes encima de la línea
+    if (buyData.length > 0) {
+      datasets.push({
+        label: "Compras", data: buyData, type: "scatter",
+        backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5,
+        pointRadius: 5, pointHoverRadius: 7, order: 0 // order 0 para que se dibuje por encima
+      });
+    }
+
+    // Dibujar puntos rojos encima de la línea
+    if (sellData.length > 0) {
+      datasets.push({
+        label: "Ventas", data: sellData, type: "scatter",
+        backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5,
+        pointRadius: 5, pointHoverRadius: 7, order: 0
+      });
+    }
+    // -------------------------------------------------------------
 
     for (const [id, b] of benchSeries) {
       if (!visible.has(id) || !b.map) continue;
@@ -62,7 +116,14 @@
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`,
+              label: ctx => {
+                // MODIFICACIÓN DEL TOOLTIP: Si es un punto de compra/venta, muestra nuestra descripción
+                if (ctx.dataset.type === "scatter") {
+                  return ` ${ctx.raw.desc}`;
+                }
+                // Si es la línea de cartera o índice, muestra el porcentaje normal
+                return ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`;
+              }
             },
           },
           zoom: {
@@ -73,10 +134,10 @@
       },
     };
 
-    const ctx = document.getElementById("perfChart");
+    const ctxCanvas = document.getElementById("perfChart");
     if (perfChart) perfChart.destroy();
-    perfChart = new Chart(ctx, cfg);
-    ctx.ondblclick = () => perfChart.resetZoom();
+    perfChart = new Chart(ctxCanvas, cfg);
+    ctxCanvas.ondblclick = () => perfChart.resetZoom();
   };
 
   /**
@@ -120,7 +181,6 @@
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: "index", intersect: false },
         scales: {
-          // Barras apiladas: aportado + ganancia = altura total (el valor)
           x: { stacked: true, grid: { display: false } },
           y: { stacked: true, ticks: { callback: v => EUR.format(v) } },
         },
@@ -130,8 +190,8 @@
         },
       },
     };
-    const ctx = document.getElementById("moneyChart");
+    const ctxCanvas = document.getElementById("moneyChart");
     if (moneyChart) moneyChart.destroy();
-    moneyChart = new Chart(ctx, cfg);
+    moneyChart = new Chart(ctxCanvas, cfg);
   };
 })();

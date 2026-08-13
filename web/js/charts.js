@@ -11,10 +11,8 @@
 
   const EUR = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
-  // Estado global para los filtros de operaciones
   DG.tradeFilters = DG.tradeFilters || { hidden: new Set(), dropdownOpen: false };
 
-  // Listener global para cerrar el dropdown si se hace clic fuera de él
   document.addEventListener("click", (e) => {
     const dropdown = document.getElementById("tradeDropdown");
     if (dropdown && !dropdown.contains(e.target)) {
@@ -23,21 +21,11 @@
     }
   });
 
-  /**
-   * @param twr [{day,index}] serie del usuario
-   * @param benchSeries Map id -> {label,color,map} (Map dayKey->close)
-   * @param visible Set de ids visibles
-   * @param range {from,to} dayKeys
-   * @param events [] Movimientos en bruto para dibujar compras/ventas
-   */
   DG.renderPerfChart = function (twr, benchSeries, visible, range, events = []) {
     const pts = twr.filter(p => p.day >= range.from && p.day <= range.to);
     if (!pts.length) return;
 
     const base = pts[0].index;
-
-    // 1. Preparar línea principal y vincularla a la búsqueda temporal
-    // Añadimos un array "trades" vacío a cada día para rellenarlo después
     const userData = pts.map(p => ({ 
       x: new Date(p.day + "T00:00:00Z").getTime(), 
       y: (p.index / base) * 100,
@@ -60,8 +48,6 @@
       if (ev.type === "trade" && ev.date) {
         const day = DG.dayKey(ev.date);
         const tradeTime = new Date(day + "T00:00:00Z").getTime();
-        
-        // Comprobar si la operación está dentro del rango visible del gráfico
         const fromTime = new Date(range.from + "T00:00:00Z").getTime();
         const toTime = new Date(range.to + "T00:00:00Z").getTime();
         
@@ -74,62 +60,36 @@
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
           const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           const action = ev.side === 1 ? "Compra" : "Venta";
-          const desc = `${action} de ${ticker}, ${qty}x$${price}`;
+          const desc = `${action} ${ticker}, ${qty}x${price}`;
 
-          // MAGIA AQUÍ: Encontrar el día de cotización más cercano en userData 
-          // (Si compraste en sábado, se ajusta al viernes o lunes automáticamente)
           let closestIdx = 0;
           let minDiff = Infinity;
           for (let i = 0; i < userData.length; i++) {
              const diff = Math.abs(userData[i].x - tradeTime);
-             if (diff < minDiff) {
-                minDiff = diff;
-                closestIdx = i;
-             }
-             if (userData[i].x > tradeTime) break; // Optimización (la lista está ordenada)
+             if (diff < minDiff) { minDiff = diff; closestIdx = i; }
+             if (userData[i].x > tradeTime) break;
           }
           
           const snapPt = userData[closestIdx];
-          snapPt.trades.push(desc); // Inyectamos el texto de la compra DENTRO del punto de la línea azul
-
-          // Crear el punto visual exactamente en la misma coordenada que la línea sin dejar espacios nulos
+          snapPt.trades.push(desc);
           const pt = { x: snapPt.x, y: snapPt.y };
-          
-          if (ev.side === 1) buyData.push(pt);
-          else sellData.push(pt);
+          if (ev.side === 1) buyData.push(pt); else sellData.push(pt);
         }
       }
     }
 
-    if (buyData.length > 0) {
-      datasets.push({
-        label: "Compras", data: buyData, type: "scatter", xAxisID: "x",
-        backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5,
-        pointRadius: 5, pointHoverRadius: 7, order: 0 
-      });
-    }
-
-    if (sellData.length > 0) {
-      datasets.push({
-        label: "Ventas", data: sellData, type: "scatter", xAxisID: "x",
-        backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5,
-        pointRadius: 5, pointHoverRadius: 7, order: 0
-      });
-    }
+    if (buyData.length > 0) datasets.push({ label: "Compras", data: buyData, type: "scatter", backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
+    if (sellData.length > 0) datasets.push({ label: "Ventas", data: sellData, type: "scatter", backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
 
     for (const [id, b] of benchSeries) {
       if (!visible.has(id) || !b.map) continue;
       const start = DG.seriesAt(b.map, pts[0].day);
       if (!start) continue;
-      const data = [];
-      for (const p of pts) {
+      const data = pts.map(p => {
         const v = DG.seriesAt(b.map, p.day);
-        if (v != null) data.push({ x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 });
-      }
-      datasets.push({
-        label: b.label, data, borderColor: b.color,
-        borderWidth: 1.6, pointRadius: 0, fill: false, tension: .1,
-      });
+        return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 } : null;
+      }).filter(Boolean);
+      datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: .1 });
     }
 
     const cfg = {
@@ -137,7 +97,6 @@
       data: { datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        // Buscamos estrictamente por coordenadas en el eje X
         interaction: { mode: "x", intersect: false },
         scales: {
           x: { type: "time", time: { unit: "month", tooltipFormat: "dd MMM yyyy" }, grid: { display: false } },
@@ -146,28 +105,13 @@
         plugins: {
           legend: { display: false },
           tooltip: {
-            // Filtramos los puntos sueltos para que el tooltip SÓLO se lea de las líneas continuas
-            filter: function(tooltipItem) {
-              return tooltipItem.dataset.type !== "scatter";
-            },
-            callbacks: {
-              label: ctx => {
-                const labelStr = ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`;
-                
-                // Si estamos leyendo la línea de tu Cartera (Index 0) y hemos inyectado operaciones...
-                if (ctx.datasetIndex === 0 && ctx.raw && ctx.raw.trades && ctx.raw.trades.length > 0) {
-                  // Devolvemos un array: la primera línea es la rentabilidad, las siguientes son las operaciones
-                  return [labelStr, ...ctx.raw.trades.map(t => `   • ${t}`)];
-                }
-                
-                return labelStr;
-              }
-            },
+            filter: (item) => item.dataset.type !== "scatter",
+            callbacks: { label: ctx => {
+              const labelStr = ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`;
+              return (ctx.datasetIndex === 0 && ctx.raw?.trades?.length) ? [labelStr, ...ctx.raw.trades.map(t => `   • ${t}`)] : labelStr;
+            }}
           },
-          zoom: {
-            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" },
-            pan: { enabled: true, mode: "x", modifierKey: "shift" },
-          },
+          zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" }, pan: { enabled: true, mode: "x", modifierKey: "shift" } },
         },
       },
     };
@@ -177,17 +121,11 @@
     perfChart = new Chart(ctxCanvas, cfg);
     ctxCanvas.ondblclick = () => perfChart.resetZoom();
 
-    // Renderizar o actualizar el menú desplegable dinámicamente
     renderTradeDropdown(tickersInView, twr, benchSeries, visible, range, events);
   };
 
-  /**
-   * Genera y mantiene el estado del menú desplegable con buscador.
-   */
   function renderTradeDropdown(tickers, twr, benchSeries, visible, range, events) {
     let container = document.getElementById("tradeFiltersContainer");
-    
-    // Inyectarlo debajo de los botones de índices si no existe
     if (!container) {
       container = document.createElement("div");
       container.id = "tradeFiltersContainer";
@@ -195,158 +133,70 @@
       const benchDiv = document.getElementById("benchToggles");
       if (benchDiv) benchDiv.parentNode.insertBefore(container, benchDiv.nextSibling);
     }
-    
-    if (tickers.size === 0) {
-      container.innerHTML = "";
-      return;
-    }
 
     const tickerArray = Array.from(tickers).sort();
     const visibleCount = tickerArray.filter(t => !DG.tradeFilters.hidden.has(t)).length;
-    const btnText = `Filtro operaciones: ${visibleCount}/${tickerArray.length} visibles ▼`;
+    const btnText = `Acciones (${visibleCount}/${tickerArray.length}) ▼`;
 
-    // Si el menú no existe en el DOM, lo construimos desde cero
     let dropdown = document.getElementById("tradeDropdown");
     if (!dropdown) {
       container.innerHTML = `
-        <div class="custom-dropdown ${DG.tradeFilters.dropdownOpen ? 'open' : ''}" id="tradeDropdown">
-          <button class="dropdown-btn" id="tradeDropdownBtn">
-            <span class="dot" style="background:#1c2b3a"></span>
-            <span id="tradeDropdownText">${btnText}</span>
-          </button>
-          <div class="dropdown-content" id="tradeDropdownContent">
-            <div class="dropdown-header">
-              <div class="dropdown-search">
-                <input type="text" id="tradeSearchInput" placeholder="Buscar ticker..." autocomplete="off">
-              </div>
-              <div class="dropdown-actions">
-                <button id="btnMarcarTodas">Marcar todas</button>
-                <button id="btnDesmarcarTodas">Limpiar</button>
-              </div>
+        <div class="custom-dropdown" id="tradeDropdown">
+          <button class="dropdown-btn" id="tradeDropdownBtn"><span>${btnText}</span></button>
+          <div class="dropdown-content">
+            <div class="dropdown-search"><input type="text" id="tradeSearchInput" placeholder="Buscar ticker..."></div>
+            <div class="dropdown-actions">
+              <button id="btnMarcarTodas">Todas</button>
+              <button id="btnDesmarcarTodas">Limpiar</button>
             </div>
             <div id="dropdownList"></div>
           </div>
         </div>
       `;
 
-      // Eventos del botón principal
-      document.getElementById("tradeDropdownBtn").onclick = (e) => {
-        e.stopPropagation();
-        DG.tradeFilters.dropdownOpen = !DG.tradeFilters.dropdownOpen;
-        document.getElementById("tradeDropdown").classList.toggle("open", DG.tradeFilters.dropdownOpen);
-        if (DG.tradeFilters.dropdownOpen) {
-          document.getElementById("tradeSearchInput").focus();
-        }
+      document.getElementById("tradeDropdownBtn").onclick = (e) => { e.stopPropagation(); document.getElementById("tradeDropdown").classList.toggle("open"); };
+      document.getElementById("tradeSearchInput").onkeyup = (e) => {
+        const val = e.target.value.toLowerCase();
+        document.querySelectorAll(".dropdown-item").forEach(i => i.style.display = i.textContent.toLowerCase().includes(val) ? "flex" : "none");
       };
-
-      // Eventos del buscador
-      const searchInput = document.getElementById("tradeSearchInput");
-      searchInput.onclick = (e) => e.stopPropagation();
-      searchInput.onkeyup = (e) => {
-        const filter = e.target.value.toLowerCase();
-        const items = document.querySelectorAll(".dropdown-item");
-        items.forEach(item => {
-          const text = item.textContent.toLowerCase();
-          item.style.display = text.includes(filter) ? "flex" : "none";
-        });
-      };
-
-      // Eventos de limpieza global
-      document.getElementById("btnMarcarTodas").onclick = (e) => {
-        e.stopPropagation();
-        DG.tradeFilters.hidden.clear();
-        DG.renderPerfChart(twr, benchSeries, visible, range, events);
-      };
-
-      document.getElementById("btnDesmarcarTodas").onclick = (e) => {
-        e.stopPropagation();
-        tickerArray.forEach(t => DG.tradeFilters.hidden.add(t));
-        DG.renderPerfChart(twr, benchSeries, visible, range, events);
-      };
-
-      // Rellenar la lista de checkboxes
-      const list = document.getElementById("dropdownList");
-      tickerArray.forEach(ticker => {
-        const isChecked = !DG.tradeFilters.hidden.has(ticker);
-        const label = document.createElement("label");
-        label.className = "dropdown-item";
-        label.innerHTML = `<input type="checkbox" value="${ticker}" ${isChecked ? "checked" : ""}> ${ticker}`;
-        
-        const checkbox = label.querySelector("input");
-        checkbox.onclick = (e) => e.stopPropagation(); // Evitar cerrar al hacer clic
-        checkbox.onchange = (e) => {
-          if (e.target.checked) {
-            DG.tradeFilters.hidden.delete(ticker);
-          } else {
-            DG.tradeFilters.hidden.add(ticker);
-          }
-          DG.renderPerfChart(twr, benchSeries, visible, range, events);
-        };
-        
-        list.appendChild(label);
-      });
+      document.getElementById("btnMarcarTodas").onclick = () => { DG.tradeFilters.hidden.clear(); DG.renderPerfChart(twr, benchSeries, visible, range, events); };
+      document.getElementById("btnDesmarcarTodas").onclick = () => { tickerArray.forEach(t => DG.tradeFilters.hidden.add(t)); DG.renderPerfChart(twr, benchSeries, visible, range, events); };
     } else {
-      // Si el menú ya existe, SOLO actualizamos los textos y las marcas (sin destruir el DOM)
-      document.getElementById("tradeDropdownText").textContent = btnText;
-      
-      const checkboxes = document.querySelectorAll("#dropdownList input[type='checkbox']");
-      checkboxes.forEach(cb => {
-        cb.checked = !DG.tradeFilters.hidden.has(cb.value);
-      });
+      document.getElementById("tradeDropdownBtn").querySelector("span").textContent = btnText;
     }
+
+    const list = document.getElementById("dropdownList");
+    list.innerHTML = "";
+    tickerArray.forEach(ticker => {
+      const label = document.createElement("label");
+      label.className = "dropdown-item";
+      label.innerHTML = `<input type="checkbox" ${!DG.tradeFilters.hidden.has(ticker) ? "checked" : ""}> ${ticker}`;
+      label.querySelector("input").onchange = (e) => {
+        e.target.checked ? DG.tradeFilters.hidden.delete(ticker) : DG.tradeFilters.hidden.add(ticker);
+        DG.renderPerfChart(twr, benchSeries, visible, range, events);
+      };
+      list.appendChild(label);
+    });
   }
 
-  /**
-   * @param moneySeries serie mensual completa
-   * @param range {from,to} dayKeys
-   */
   DG.renderMoneyChart = function (moneySeries, range) {
     let rows = moneySeries;
     if (range) {
       const mFrom = range.from.slice(0, 7), mTo = range.to.slice(0, 7);
       rows = moneySeries.filter(m => m.month >= mFrom && m.month <= mTo);
     }
-    if (!rows.length) rows = moneySeries;
     const cfg = {
       data: {
         labels: rows.map(m => m.month),
         datasets: [
-          {
-            type: "bar", label: "Aportación neta acumulada",
-            data: rows.map(m => m.netCum),
-            backgroundColor: "rgba(0,41,78,.55)", borderRadius: 2, order: 3,
-            stack: "money",
-          },
-          {
-            type: "bar", label: "Ganancia (valor − aportado)",
-            data: rows.map(m => m.gain),
-            backgroundColor: rows.map(m => (m.gain ?? 0) >= 0 ? "rgba(46,158,91,.65)" : "rgba(214,69,65,.65)"),
-            borderRadius: 2, order: 2,
-            stack: "money",
-          },
-          {
-            type: "line", label: "Valor de la cartera",
-            data: rows.map(m => m.value),
-            borderColor: "#009fdf", borderWidth: 2, pointRadius: 0, tension: .15, order: 1,
-            stack: "valor",
-          },
+          { type: "bar", label: "Aportado", data: rows.map(m => m.netCum), backgroundColor: "rgba(0,41,78,.55)", stack: "money" },
+          { type: "bar", label: "Ganancia", data: rows.map(m => m.gain), backgroundColor: rows.map(m => (m.gain ?? 0) >= 0 ? "rgba(46,158,91,.65)" : "rgba(214,69,65,.65)"), stack: "money" },
+          { type: "line", label: "Valor", data: rows.map(m => m.value), borderColor: "#009fdf", borderWidth: 2, pointRadius: 0, tension: .15 }
         ],
       },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        scales: {
-          x: { stacked: true, grid: { display: false } },
-          y: { stacked: true, ticks: { callback: v => EUR.format(v) } },
-        },
-        plugins: {
-          legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },
-          tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${EUR.format(ctx.parsed.y ?? 0)}` } },
-        },
-      },
+      options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => EUR.format(v) } } } }
     };
-    const ctxCanvas = document.getElementById("moneyChart");
     if (moneyChart) moneyChart.destroy();
-    moneyChart = new Chart(ctxCanvas, cfg);
+    moneyChart = new Chart(document.getElementById("moneyChart"), cfg);
   };
 })();

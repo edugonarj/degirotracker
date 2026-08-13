@@ -62,7 +62,6 @@
           const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
           tickersInView.add(ticker);
 
-          // Si el ticker está oculto en el filtro, saltamos
           if (DG.tradeFilters.hidden.has(ticker)) continue;
 
           const yVal = yByDay.get(day); 
@@ -130,11 +129,9 @@
           tooltip: {
             callbacks: {
               label: ctx => {
-                // Comprobamos directamente si el punto tiene la propiedad 'desc' para mostrar la operación
                 if (ctx.raw && ctx.raw.desc) {
                   return ` ${ctx.raw.desc}`;
                 }
-                // Si no tiene 'desc', es una línea normal (cartera o índice)
                 return ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`;
               }
             },
@@ -152,12 +149,12 @@
     perfChart = new Chart(ctxCanvas, cfg);
     ctxCanvas.ondblclick = () => perfChart.resetZoom();
 
-    // Renderizar el menú desplegable dinámicamente
+    // Renderizar o actualizar el menú desplegable dinámicamente
     renderTradeDropdown(tickersInView, twr, benchSeries, visible, range, events);
   };
 
   /**
-   * Genera el menú desplegable (dropdown) de checkboxes para filtrar tickers.
+   * Genera y mantiene el estado del menú desplegable con buscador.
    */
   function renderTradeDropdown(tickers, twr, benchSeries, visible, range, events) {
     let container = document.getElementById("tradeFiltersContainer");
@@ -178,64 +175,97 @@
 
     const tickerArray = Array.from(tickers).sort();
     const visibleCount = tickerArray.filter(t => !DG.tradeFilters.hidden.has(t)).length;
+    const btnText = `Filtro operaciones: ${visibleCount}/${tickerArray.length} visibles ▼`;
 
-    // Crear la estructura HTML del menú desplegable
-    container.innerHTML = `
-      <div class="custom-dropdown ${DG.tradeFilters.dropdownOpen ? 'open' : ''}" id="tradeDropdown">
-        <button class="dropdown-btn" id="tradeDropdownBtn">
-          <span class="dot" style="background:#1c2b3a"></span>
-          Filtro operaciones: ${visibleCount}/${tickerArray.length} visibles ▼
-        </button>
-        <div class="dropdown-content" id="tradeDropdownContent">
-          <div class="dropdown-actions">
-            <button id="btnMarcarTodas">Marcar todas</button>
-            <button id="btnDesmarcarTodas">Limpiar</button>
+    // Si el menú no existe en el DOM, lo construimos desde cero
+    let dropdown = document.getElementById("tradeDropdown");
+    if (!dropdown) {
+      container.innerHTML = `
+        <div class="custom-dropdown ${DG.tradeFilters.dropdownOpen ? 'open' : ''}" id="tradeDropdown">
+          <button class="dropdown-btn" id="tradeDropdownBtn">
+            <span class="dot" style="background:#1c2b3a"></span>
+            <span id="tradeDropdownText">${btnText}</span>
+          </button>
+          <div class="dropdown-content" id="tradeDropdownContent">
+            <div class="dropdown-header">
+              <div class="dropdown-search">
+                <input type="text" id="tradeSearchInput" placeholder="Buscar ticker..." autocomplete="off">
+              </div>
+              <div class="dropdown-actions">
+                <button id="btnMarcarTodas">Marcar todas</button>
+                <button id="btnDesmarcarTodas">Limpiar</button>
+              </div>
+            </div>
+            <div id="dropdownList"></div>
           </div>
-          <div id="dropdownList"></div>
         </div>
-      </div>
-    `;
+      `;
 
-    // Botón para abrir/cerrar
-    document.getElementById("tradeDropdownBtn").onclick = (e) => {
-      e.stopPropagation();
-      DG.tradeFilters.dropdownOpen = !DG.tradeFilters.dropdownOpen;
-      document.getElementById("tradeDropdown").classList.toggle("open", DG.tradeFilters.dropdownOpen);
-    };
-
-    // Acciones globales
-    document.getElementById("btnMarcarTodas").onclick = (e) => {
-      e.stopPropagation();
-      DG.tradeFilters.hidden.clear();
-      DG.renderPerfChart(twr, benchSeries, visible, range, events);
-    };
-
-    document.getElementById("btnDesmarcarTodas").onclick = (e) => {
-      e.stopPropagation();
-      tickerArray.forEach(t => DG.tradeFilters.hidden.add(t));
-      DG.renderPerfChart(twr, benchSeries, visible, range, events);
-    };
-
-    // Rellenar la lista de checkboxes
-    const list = document.getElementById("dropdownList");
-    tickerArray.forEach(ticker => {
-      const isChecked = !DG.tradeFilters.hidden.has(ticker);
-      const label = document.createElement("label");
-      label.className = "dropdown-item";
-      label.innerHTML = `<input type="checkbox" ${isChecked ? "checked" : ""}> ${ticker}`;
-      
-      const checkbox = label.querySelector("input");
-      checkbox.onchange = (e) => {
-        if (e.target.checked) {
-          DG.tradeFilters.hidden.delete(ticker);
-        } else {
-          DG.tradeFilters.hidden.add(ticker);
+      // Eventos del botón principal
+      document.getElementById("tradeDropdownBtn").onclick = (e) => {
+        e.stopPropagation();
+        DG.tradeFilters.dropdownOpen = !DG.tradeFilters.dropdownOpen;
+        document.getElementById("tradeDropdown").classList.toggle("open", DG.tradeFilters.dropdownOpen);
+        if (DG.tradeFilters.dropdownOpen) {
+          document.getElementById("tradeSearchInput").focus();
         }
+      };
+
+      // Eventos del buscador
+      const searchInput = document.getElementById("tradeSearchInput");
+      searchInput.onclick = (e) => e.stopPropagation();
+      searchInput.onkeyup = (e) => {
+        const filter = e.target.value.toLowerCase();
+        const items = document.querySelectorAll(".dropdown-item");
+        items.forEach(item => {
+          const text = item.textContent.toLowerCase();
+          item.style.display = text.includes(filter) ? "flex" : "none";
+        });
+      };
+
+      // Eventos de limpieza global
+      document.getElementById("btnMarcarTodas").onclick = (e) => {
+        e.stopPropagation();
+        DG.tradeFilters.hidden.clear();
         DG.renderPerfChart(twr, benchSeries, visible, range, events);
       };
+
+      document.getElementById("btnDesmarcarTodas").onclick = (e) => {
+        e.stopPropagation();
+        tickerArray.forEach(t => DG.tradeFilters.hidden.add(t));
+        DG.renderPerfChart(twr, benchSeries, visible, range, events);
+      };
+
+      // Rellenar la lista de checkboxes
+      const list = document.getElementById("dropdownList");
+      tickerArray.forEach(ticker => {
+        const isChecked = !DG.tradeFilters.hidden.has(ticker);
+        const label = document.createElement("label");
+        label.className = "dropdown-item";
+        label.innerHTML = `<input type="checkbox" value="${ticker}" ${isChecked ? "checked" : ""}> ${ticker}`;
+        
+        const checkbox = label.querySelector("input");
+        checkbox.onclick = (e) => e.stopPropagation(); // Evitar cerrar al hacer clic
+        checkbox.onchange = (e) => {
+          if (e.target.checked) {
+            DG.tradeFilters.hidden.delete(ticker);
+          } else {
+            DG.tradeFilters.hidden.add(ticker);
+          }
+          DG.renderPerfChart(twr, benchSeries, visible, range, events);
+        };
+        
+        list.appendChild(label);
+      });
+    } else {
+      // Si el menú ya existe, SOLO actualizamos los textos y las marcas (sin destruir el DOM)
+      document.getElementById("tradeDropdownText").textContent = btnText;
       
-      list.appendChild(label);
-    });
+      const checkboxes = document.querySelectorAll("#dropdownList input[type='checkbox']");
+      checkboxes.forEach(cb => {
+        cb.checked = !DG.tradeFilters.hidden.has(cb.value);
+      });
+    }
   }
 
   /**

@@ -130,9 +130,11 @@
           tooltip: {
             callbacks: {
               label: ctx => {
-                if (ctx.dataset.type === "scatter") {
+                // Comprobamos directamente si el punto tiene la propiedad 'desc' para mostrar la operación
+                if (ctx.raw && ctx.raw.desc) {
                   return ` ${ctx.raw.desc}`;
                 }
+                // Si no tiene 'desc', es una línea normal (cartera o índice)
                 return ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`;
               }
             },

@@ -11,6 +11,9 @@
 
   const EUR = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
+  // Estado global para los filtros de operaciones en el gráfico
+  DG.tradeFilters = DG.tradeFilters || { showAny: true, hidden: new Set() };
+
   /**
    * @param twr [{day,index}] serie del usuario
    * @param benchSeries Map id -> {label,color,map} (Map dayKey->close)
@@ -22,13 +25,9 @@
     const pts = twr.filter(p => p.day >= range.from && p.day <= range.to);
     if (!pts.length) return;
 
-    // Re-basar el TWR del usuario a 100 al inicio del rango
     const base = pts[0].index;
-    
-    // Diccionario rápido para saber qué altura (Y) tenía la cartera en cada día (X en string)
     const yByDay = new Map(pts.map(p => [p.day, (p.index / base) * 100]));
 
-    // Generamos los datos con la X convertida a timestamp (milisegundos) para evitar fallos de Chart.js
     const userData = pts.map(p => ({ 
       x: new Date(p.day + "T00:00:00Z").getTime(), 
       y: (p.index / base) * 100 
@@ -42,27 +41,27 @@
       borderWidth: 2.5, pointRadius: 0, fill: true, tension: .1,
     }];
 
-    // --- PROCESAMIENTO DE COMPRAS Y VENTAS PARA PINTAR PUNTOS ---
     const buyData = [];
     const sellData = [];
+    const tickersInView = new Set();
 
     for (const ev of events) {
       if (ev.type === "trade" && ev.date) {
         const day = DG.dayKey(ev.date);
         
-        // Solo dibujamos los puntos si están dentro del rango de fechas que miramos
         if (day >= range.from && day <= range.to && yByDay.has(day)) {
+          const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
+          tickersInView.add(ticker);
+
+          if (!DG.tradeFilters.showAny || DG.tradeFilters.hidden.has(ticker)) continue;
+
           const yVal = yByDay.get(day); 
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
-          const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+          const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           const action = ev.side === 1 ? "Compra" : "Venta";
           
-          const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
-          const product = ev.product || "Desconocido";
+          const desc = `${action} de ${ticker}, ${qty}x$${price}`;
 
-          const desc = `${action} de ${product}, ${qty}x$${price}. Tipo: ${ticker}`;
-
-          // Guardamos la X estrictamente como timestamp para los scatter
           const pt = { 
             x: new Date(day + "T00:00:00Z").getTime(), 
             y: yVal, 
@@ -90,7 +89,6 @@
         pointRadius: 5, pointHoverRadius: 7, order: 0
       });
     }
-    // -------------------------------------------------------------
 
     for (const [id, b] of benchSeries) {
       if (!visible.has(id) || !b.map) continue;
@@ -99,7 +97,6 @@
       const data = [];
       for (const p of pts) {
         const v = DG.seriesAt(b.map, p.day);
-        // Índices también convertidos a timestamp
         if (v != null) data.push({ x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 });
       }
       datasets.push({
@@ -142,7 +139,58 @@
     if (perfChart) perfChart.destroy();
     perfChart = new Chart(ctxCanvas, cfg);
     ctxCanvas.ondblclick = () => perfChart.resetZoom();
+
+    renderTradeToggles(tickersInView, twr, benchSeries, visible, range, events);
   };
+
+  /**
+   * Genera los botones para encender/apagar puntos de compra y venta.
+   */
+  function renderTradeToggles(tickers, twr, benchSeries, visible, range, events) {
+    let container = document.getElementById("tradeToggles");
+    
+    // Si no existe, lo inyectamos dinámicamente debajo de benchToggles
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "tradeToggles";
+      container.className = "bench-toggles";
+      container.style.marginTop = "8px";
+      const benchDiv = document.getElementById("benchToggles");
+      if (benchDiv) benchDiv.parentNode.insertBefore(container, benchDiv.nextSibling);
+    }
+    
+    container.innerHTML = "";
+    if (tickers.size === 0) return;
+
+    // Botón Bulk
+    const bulkBtn = document.createElement("div");
+    bulkBtn.className = "toggle" + (DG.tradeFilters.showAny ? "" : " off");
+    bulkBtn.innerHTML = `<span class="dot" style="background:#1c2b3a"></span>Mostrar Operaciones`;
+    bulkBtn.onclick = () => {
+      DG.tradeFilters.showAny = !DG.tradeFilters.showAny;
+      DG.renderPerfChart(twr, benchSeries, visible, range, events);
+    };
+    container.appendChild(bulkBtn);
+
+    // Botones Individuales (se ocultan si el Bulk está desactivado)
+    if (DG.tradeFilters.showAny) {
+      Array.from(tickers).sort().forEach(ticker => {
+        const btn = document.createElement("div");
+        const isHidden = DG.tradeFilters.hidden.has(ticker);
+        btn.className = "toggle" + (isHidden ? " off" : "");
+        btn.innerHTML = `<span class="dot" style="background:#6b7a89"></span>${ticker}`;
+        btn.onclick = () => {
+          if (isHidden) {
+            DG.tradeFilters.hidden.delete(ticker);
+          } else {
+            DG.tradeFilters.hidden.add(ticker);
+          }
+          DG.renderPerfChart(twr, benchSeries, visible, range, events);
+        };
+        container.appendChild(btn);
+      });
+    }
+  }
 
   /**
    * @param moneySeries serie mensual completa

@@ -24,10 +24,15 @@
 
     // Re-basar el TWR del usuario a 100 al inicio del rango
     const base = pts[0].index;
-    const userData = pts.map(p => ({ x: p.day, y: (p.index / base) * 100 }));
     
-    // Diccionario rápido para saber qué altura (Y) tenía la cartera en cada día (X)
-    const yByDay = new Map(userData.map(d => [d.x, d.y]));
+    // Diccionario rápido para saber qué altura (Y) tenía la cartera en cada día (X en string)
+    const yByDay = new Map(pts.map(p => [p.day, (p.index / base) * 100]));
+
+    // Generamos los datos con la X convertida a timestamp (milisegundos) para evitar fallos de Chart.js
+    const userData = pts.map(p => ({ 
+      x: new Date(p.day + "T00:00:00Z").getTime(), 
+      y: (p.index / base) * 100 
+    }));
 
     const datasets = [{
       label: "Mi cartera",
@@ -47,20 +52,22 @@
         
         // Solo dibujamos los puntos si están dentro del rango de fechas que miramos
         if (day >= range.from && day <= range.to && yByDay.has(day)) {
-          const yVal = yByDay.get(day); // Altura exacta de la línea ese día
+          const yVal = yByDay.get(day); 
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
           const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-          const cur = ev.tradeCur || "EUR";
           const action = ev.side === 1 ? "Compra" : "Venta";
           
-          // Intentar sacar el Ticker (ej: ASTS) desde el ISIN, si no, usa el propio ISIN
           const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
           const product = ev.product || "Desconocido";
 
-          // Texto exacto para el Tooltip
           const desc = `${action} de ${product}, ${qty}x$${price}. Tipo: ${ticker}`;
 
-          const pt = { x: day, y: yVal, desc: desc };
+          // Guardamos la X estrictamente como timestamp para los scatter
+          const pt = { 
+            x: new Date(day + "T00:00:00Z").getTime(), 
+            y: yVal, 
+            desc: desc 
+          };
           
           if (ev.side === 1) buyData.push(pt);
           else sellData.push(pt);
@@ -68,19 +75,17 @@
       }
     }
 
-    // Dibujar puntos verdes encima de la línea
     if (buyData.length > 0) {
       datasets.push({
-        label: "Compras", data: buyData, type: "scatter",
+        label: "Compras", data: buyData, type: "scatter", xAxisID: "x",
         backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5,
-        pointRadius: 5, pointHoverRadius: 7, order: 0 // order 0 para que se dibuje por encima
+        pointRadius: 5, pointHoverRadius: 7, order: 0 
       });
     }
 
-    // Dibujar puntos rojos encima de la línea
     if (sellData.length > 0) {
       datasets.push({
-        label: "Ventas", data: sellData, type: "scatter",
+        label: "Ventas", data: sellData, type: "scatter", xAxisID: "x",
         backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5,
         pointRadius: 5, pointHoverRadius: 7, order: 0
       });
@@ -94,7 +99,8 @@
       const data = [];
       for (const p of pts) {
         const v = DG.seriesAt(b.map, p.day);
-        if (v != null) data.push({ x: p.day, y: (v / start) * 100 });
+        // Índices también convertidos a timestamp
+        if (v != null) data.push({ x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 });
       }
       datasets.push({
         label: b.label, data, borderColor: b.color,
@@ -117,11 +123,9 @@
           tooltip: {
             callbacks: {
               label: ctx => {
-                // MODIFICACIÓN DEL TOOLTIP: Si es un punto de compra/venta, muestra nuestra descripción
                 if (ctx.dataset.type === "scatter") {
                   return ` ${ctx.raw.desc}`;
                 }
-                // Si es la línea de cartera o índice, muestra el porcentaje normal
                 return ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} (${(ctx.parsed.y - 100).toFixed(1)}%)`;
               }
             },
@@ -142,8 +146,7 @@
 
   /**
    * @param moneySeries serie mensual completa
-   * @param range {from,to} dayKeys — mismo filtro de fechas que el gráfico
-   *              de rendimiento (se comparan por mes 'YYYY-MM')
+   * @param range {from,to} dayKeys
    */
   DG.renderMoneyChart = function (moneySeries, range) {
     let rows = moneySeries;

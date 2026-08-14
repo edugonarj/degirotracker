@@ -11,15 +11,7 @@
 
   const EUR = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
-  DG.tradeFilters = DG.tradeFilters || { hidden: new Set(), dropdownOpen: false };
-
-  document.addEventListener("click", (e) => {
-    const dropdown = document.getElementById("tradeDropdown");
-    if (dropdown && !dropdown.contains(e.target)) {
-      dropdown.classList.remove("open");
-      DG.tradeFilters.dropdownOpen = false;
-    }
-  });
+  DG.tradeFilters = DG.tradeFilters || { hidden: new Set() };
 
   DG.renderPerfChart = function (twr, benchSeries, visible, range, events = []) {
     const pts = twr.filter(p => p.day >= range.from && p.day <= range.to);
@@ -42,7 +34,6 @@
 
     const buyData = [];
     const sellData = [];
-    const tickersInView = new Set();
 
     for (const ev of events) {
       if (ev.type === "trade" && ev.date) {
@@ -53,8 +44,8 @@
         
         if (tradeTime >= fromTime && tradeTime <= toTime) {
           const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
-          tickersInView.add(ticker);
 
+          // Filtramos en base a si la acción está desmarcada en la tabla
           if (DG.tradeFilters.hidden.has(ticker)) continue;
 
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
@@ -120,64 +111,7 @@
     if (perfChart) perfChart.destroy();
     perfChart = new Chart(ctxCanvas, cfg);
     ctxCanvas.ondblclick = () => perfChart.resetZoom();
-
-    renderTradeDropdown(tickersInView, twr, benchSeries, visible, range, events);
   };
-
-  function renderTradeDropdown(tickers, twr, benchSeries, visible, range, events) {
-    let container = document.getElementById("tradeFiltersContainer");
-    if (!container) {
-      container = document.createElement("div");
-      container.id = "tradeFiltersContainer";
-      container.className = "trade-filters-container";
-      const benchDiv = document.getElementById("benchToggles");
-      if (benchDiv) benchDiv.parentNode.insertBefore(container, benchDiv.nextSibling);
-    }
-
-    const tickerArray = Array.from(tickers).sort();
-    const visibleCount = tickerArray.filter(t => !DG.tradeFilters.hidden.has(t)).length;
-    const btnText = `Acciones (${visibleCount}/${tickerArray.length}) ▼`;
-
-    let dropdown = document.getElementById("tradeDropdown");
-    if (!dropdown) {
-      container.innerHTML = `
-        <div class="custom-dropdown" id="tradeDropdown">
-          <button class="dropdown-btn" id="tradeDropdownBtn"><span>${btnText}</span></button>
-          <div class="dropdown-content">
-            <div class="dropdown-search"><input type="text" id="tradeSearchInput" placeholder="Buscar ticker..."></div>
-            <div class="dropdown-actions">
-              <button id="btnMarcarTodas">Todas</button>
-              <button id="btnDesmarcarTodas">Limpiar</button>
-            </div>
-            <div id="dropdownList"></div>
-          </div>
-        </div>
-      `;
-
-      document.getElementById("tradeDropdownBtn").onclick = (e) => { e.stopPropagation(); document.getElementById("tradeDropdown").classList.toggle("open"); };
-      document.getElementById("tradeSearchInput").onkeyup = (e) => {
-        const val = e.target.value.toLowerCase();
-        document.querySelectorAll(".dropdown-item").forEach(i => i.style.display = i.textContent.toLowerCase().includes(val) ? "flex" : "none");
-      };
-      document.getElementById("btnMarcarTodas").onclick = () => { DG.tradeFilters.hidden.clear(); DG.renderPerfChart(twr, benchSeries, visible, range, events); };
-      document.getElementById("btnDesmarcarTodas").onclick = () => { tickerArray.forEach(t => DG.tradeFilters.hidden.add(t)); DG.renderPerfChart(twr, benchSeries, visible, range, events); };
-    } else {
-      document.getElementById("tradeDropdownBtn").querySelector("span").textContent = btnText;
-    }
-
-    const list = document.getElementById("dropdownList");
-    list.innerHTML = "";
-    tickerArray.forEach(ticker => {
-      const label = document.createElement("label");
-      label.className = "dropdown-item";
-      label.innerHTML = `<input type="checkbox" ${!DG.tradeFilters.hidden.has(ticker) ? "checked" : ""}> ${ticker}`;
-      label.querySelector("input").onchange = (e) => {
-        e.target.checked ? DG.tradeFilters.hidden.delete(ticker) : DG.tradeFilters.hidden.add(ticker);
-        DG.renderPerfChart(twr, benchSeries, visible, range, events);
-      };
-      list.appendChild(label);
-    });
-  }
 
   DG.renderMoneyChart = function (moneySeries, range) {
     let rows = moneySeries;

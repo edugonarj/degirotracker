@@ -1,6 +1,6 @@
 /**
- * app.js — Orquestación: carga del archivo, métricas, render del dashboard
- * e internacionalización (ES/EN) integrada.
+ * app.js — Orquestación: carga del archivo, métricas, render del dashboard,
+ * internacionalización (ES/EN) integrada y módulo de Fiscalidad (FIFO).
  */
 "use strict";
 
@@ -34,12 +34,22 @@
       tab_open: "Abiertas",
       tab_closed: "Cerradas",
       tab_all: "Todas",
+      tab_fiscal: "Fiscalidad",
       th_prod: "Producto",
       th_cant: "Cant.",
       th_val: "Valor",
       th_inv: "Invertido",
       th_rec: "Recibido",
-      th_div: "Div."
+      th_div: "Div.",
+      f_year: "Año Fiscal:",
+      f_acq: "Total Adquisición",
+      f_trans: "Total Transmisión",
+      f_net: "Rendimiento Neto",
+      f_buy: "F. Compra",
+      f_sell: "F. Venta",
+      f_pbuy: "P. Compra",
+      f_psell: "P. Venta",
+      f_export: "Exportar CSV"
     },
     en: {
       btn_lang: "🇪🇸 Cambiar a Español",
@@ -63,19 +73,28 @@
       tab_open: "Open",
       tab_closed: "Closed",
       tab_all: "All",
+      tab_fiscal: "Tax (FIFO)",
       th_prod: "Product",
       th_cant: "Qty.",
       th_val: "Value",
       th_inv: "Invested",
       th_rec: "Received",
-      th_div: "Div."
+      th_div: "Div.",
+      f_year: "Fiscal Year:",
+      f_acq: "Total Acquisition",
+      f_trans: "Total Transmission",
+      f_net: "Net Yield",
+      f_buy: "Buy Date",
+      f_sell: "Sell Date",
+      f_pbuy: "Buy Price",
+      f_psell: "Sell Price",
+      f_export: "Export CSV"
     }
   };
 
   let lang = "es";
   const t = (k) => i18n[lang][k] || k;
 
-  // ---------- Formateadores dinámicos ----------
   const fmtLoc = () => lang === "es" ? "es-ES" : "en-US";
   const fmt = (v, maxF) => new Intl.NumberFormat(fmtLoc(), { style: "currency", currency: "EUR", maximumFractionDigits: maxF }).format(v);
   const PCT = v => (v == null ? "—" : (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%");
@@ -84,10 +103,10 @@
     state: null, twr: null, valueSeries: null,
     benchSeries: new Map(), visibleBench: new Set(),
     priceProviders: new Map(), fxSeries: new Map(),
-    productRows: [], range: null, warnings: [], events: [] 
+    productRows: [], fifoRows: [], range: null, warnings: [], events: [],
+    fiscalYear: "Todos"
   };
 
-  // Botón flotante de idioma
   function initLangToggle() {
     if (!$("langToggleBtn")) {
       const btn = document.createElement("button");
@@ -102,7 +121,8 @@
         lang = lang === "es" ? "en" : "es";
         btn.textContent = t("btn_lang");
         if (ctx.state) {
-          if ($("tableControls")) $("tableControls").remove(); // Forzar recreación
+          if ($("tableControls")) $("tableControls").remove(); 
+          if ($("fiscalControls")) $("fiscalControls").remove();
           render();
         }
       };
@@ -112,7 +132,6 @@
   }
   document.addEventListener("DOMContentLoaded", initLangToggle);
 
-  // ---------- Carga de archivo ----------
   const dz = $("dropZone");
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("dragover"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
@@ -156,7 +175,6 @@
     }
   }
 
-  // ---------- Precios ----------
   async function loadAllPrices() {
     const st = ctx.state;
     const from = st.firstDate;
@@ -203,7 +221,6 @@
     await Promise.allSettled([...fxJobs, ...benchJobs, ...prodJobs]);
   }
 
-  // ---------- Métricas ----------
   function compute() {
     const st = ctx.state;
     DG.resolvePending(st, ctx.fxSeries);
@@ -214,9 +231,9 @@
     ctx.productRows = DG.productPnL(st, ctx.priceProviders, ctx.fxSeries, lastDay);
     ctx.moneySeries = DG.buildMoneySeries(series, st.flows);
     ctx.range = { from: series[0].day, to: lastDay };
+    ctx.fifoRows = DG.calculateFIFO(ctx.events);
   }
 
-  // ---------- Render ----------
   function render() {
     const st = ctx.state;
     const series = ctx.valueSeries;
@@ -238,6 +255,7 @@
       `<div class="card"${c.id ? ` id="${c.id}"` : ""}><div class="label">${c.label}</div><div class="value ${c.cls || ""}">${c.value}</div><div class="sub">${c.sub || ""}</div></div>`
     ).join("");
 
+    injectFiscalTab();
     renderBenchToggles();
     drawPerf();
     renderTable(currentTab || "open");
@@ -245,6 +263,16 @@
 
     $("rangeStart").value = ctx.range.from;
     $("rangeEnd").value = ctx.range.to;
+  }
+
+  function injectFiscalTab() {
+    const tabsContainer = document.querySelector(".tabs");
+    if (tabsContainer && !$("tabFiscal")) {
+      tabsContainer.insertAdjacentHTML('beforeend', `<button id="tabFiscal">${t("tab_fiscal")}</button>`);
+      $("tabFiscal").onclick = () => renderTable("fiscal");
+    } else if ($("tabFiscal")) {
+      $("tabFiscal").textContent = t("tab_fiscal");
+    }
   }
 
   function renderBenchToggles() {
@@ -327,44 +355,128 @@
   $("rangeStart").addEventListener("change", onCustomRange);
   $("rangeEnd").addEventListener("change", onCustomRange);
 
-  // ---------- Tabla y Ordenación ----------
   let currentTab = "open";
   let currentSort = { col: 'pnl', asc: false }; 
+
+  function exportCSV(rows) {
+    let csv = "Producto,ISIN,Fecha Compra,Fecha Venta,Cantidad,Precio Compra,Precio Venta,P/G,Divisa\n";
+    rows.forEach(r => {
+      const pName = (ctx.state.products.get(r.isin) || {}).name || r.isin;
+      csv += `"${pName}",${r.isin},${DG.dayKey(r.buyDate)},${DG.dayKey(r.sellDate)},${r.qty},${r.buyPrice},${r.sellPrice},${r.pl},${r.cur}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "fiscalidad_fifo.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 
   function renderTable(tab) {
     currentTab = tab;
     
-    // Traducir Pestañas
     if ($("tabOpen")) $("tabOpen").textContent = t("tab_open");
     if ($("tabClosed")) $("tabClosed").textContent = t("tab_closed");
     if ($("tabAll")) $("tabAll").textContent = t("tab_all");
     
-    for (const [id, t_id] of [["tabOpen", "open"], ["tabClosed", "closed"], ["tabAll", "all"]]) {
+    for (const [id, t_id] of [["tabOpen", "open"], ["tabClosed", "closed"], ["tabAll", "all"], ["tabFiscal", "fiscal"]]) {
       if ($(id)) $(id).classList.toggle("active", t_id === tab);
     }
 
-    // Traducir Cabeceras
-    const thead = document.querySelector("#productTable thead");
-    if (thead) {
-       thead.innerHTML = `<tr>
-         <th class="center" title="Tick">📉</th>
-         <th>${t("th_prod")}</th>
-         <th class="num">${t("th_cant")}</th>
-         <th class="num">${t("th_val")}</th>
-         <th class="num">${t("th_inv")}</th>
-         <th class="num">${t("th_rec")}</th>
-         <th class="num">${t("th_div")}</th>
-         <th class="num">P/G</th>
-         <th class="num">%</th>
-       </tr>`;
-    }
+    const tableWrap = document.querySelector(".table-wrap");
+    
+    if (tab === "fiscal") {
+      if ($("tableControls")) $("tableControls").style.display = "none";
+      
+      let fControls = $("fiscalControls");
+      if (!fControls) {
+        fControls = document.createElement("div");
+        fControls.id = "fiscalControls";
+        fControls.className = "fiscal-controls";
+        tableWrap.parentNode.insertBefore(fControls, tableWrap);
+      }
+      fControls.style.display = "block";
 
-    // Controles de Tabla
-    let controls = $("tableControls");
-    if (!controls) {
-      controls = document.createElement("div");
-      controls.id = "tableControls";
-      controls.className = "table-controls";
+      const years = [...new Set(ctx.fifoRows.map(r => r.sellDate.getFullYear()))].sort((a, b) => b - a);
+      
+      fControls.innerHTML = `
+        <div class="fiscal-header">
+          <label><b>${t("f_year")}</b> 
+            <select id="fiscalYearSelect">
+              <option value="Todos">Todos</option>
+              ${years.map(y => `<option value="${y}" ${ctx.fiscalYear == y ? "selected" : ""}>${y}</option>`).join("")}
+            </select>
+          </label>
+          <button id="btnExportCSV" class="btn-primary" style="margin-top:0; padding:6px 16px;">${t("f_export")}</button>
+        </div>
+        <div class="cards" id="fiscalSummaryCards" style="margin-top:12px;"></div>
+      `;
+
+      $("fiscalYearSelect").onchange = (e) => {
+        ctx.fiscalYear = e.target.value;
+        renderTable("fiscal");
+      };
+
+      let filteredRows = ctx.fifoRows;
+      if (ctx.fiscalYear !== "Todos") {
+        filteredRows = ctx.fifoRows.filter(r => r.sellDate.getFullYear().toString() === ctx.fiscalYear);
+      }
+
+      $("btnExportCSV").onclick = () => exportCSV(filteredRows);
+
+      let totalAcq = 0, totalTrans = 0, netYield = 0;
+      filteredRows.forEach(r => {
+        totalAcq += r.qty * r.buyPrice;
+        totalTrans += r.qty * r.sellPrice;
+        netYield += r.pl;
+      });
+
+      $("fiscalSummaryCards").innerHTML = `
+        <div class="card"><div class="label">${t("f_acq")}</div><div class="value">${fmt(totalAcq, 2)}</div></div>
+        <div class="card"><div class="label">${t("f_trans")}</div><div class="value">${fmt(totalTrans, 2)}</div></div>
+        <div class="card"><div class="label">${t("f_net")}</div><div class="value ${netYield >= 0 ? 'pos' : 'neg'}">${fmt(netYield, 2)}</div></div>
+      `;
+
+      const thead = document.querySelector("#productTable thead");
+      thead.innerHTML = `<tr>
+        <th>${t("th_prod")}</th>
+        <th class="center">${t("f_buy")}</th>
+        <th class="center">${t("f_sell")}</th>
+        <th class="num">${t("th_cant")}</th>
+        <th class="num">${t("f_pbuy")}</th>
+        <th class="num">${t("f_psell")}</th>
+        <th class="num">P/G</th>
+        <th class="center">Div.</th>
+      </tr>`;
+
+      const tbody = document.querySelector("#productTable tbody");
+      tbody.innerHTML = filteredRows.sort((a,b) => b.sellDate - a.sellDate).map(r => {
+        const pName = (ctx.state.products.get(r.isin) || {}).name || r.isin;
+        return `<tr>
+          <td class="prod" title="${r.isin}">${pName}</td>
+          <td class="center">${DG.dayKey(r.buyDate)}</td>
+          <td class="center">${DG.dayKey(r.sellDate)}</td>
+          <td class="num">${r.qty.toLocaleString(fmtLoc(), { maximumFractionDigits: 4 })}</td>
+          <td class="num">${r.buyPrice.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</td>
+          <td class="num">${r.sellPrice.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</td>
+          <td class="num ${r.pl >= 0 ? "pos" : "neg"}"><b>${(r.pl >= 0 ? "+" : "") + r.pl.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</b></td>
+          <td class="center">${r.cur}</td>
+        </tr>`;
+      }).join("");
+
+    } else {
+      if ($("fiscalControls")) $("fiscalControls").style.display = "none";
+      
+      let controls = $("tableControls");
+      if (!controls) {
+        controls = document.createElement("div");
+        controls.id = "tableControls";
+        controls.className = "table-controls";
+        tableWrap.parentNode.insertBefore(controls, tableWrap);
+      }
+      controls.style.display = "flex";
       controls.innerHTML = `
         <button id="btnCheckAll" class="btn-secondary">${t("hacer_ticks")}</button>
         <button id="btnUncheckAll" class="btn-secondary">${t("quitar_ticks")}</button>
@@ -372,8 +484,6 @@
         <button id="btnSortName" class="btn-secondary">${t("ord_alfabeto")}</button>
         <button id="btnSortPnL" class="btn-secondary">${t("ord_pg")}</button>
       `;
-      const tableWrap = document.querySelector(".table-wrap");
-      if (tableWrap) tableWrap.parentNode.insertBefore(controls, tableWrap);
 
       $("btnCheckAll").onclick = () => { DG.tradeFilters.hidden.clear(); renderTable(currentTab); drawPerf(); };
       $("btnUncheckAll").onclick = () => {
@@ -393,22 +503,32 @@
          else { currentSort.col = 'pnl'; currentSort.asc = false; }
          renderTable(currentTab); 
       };
-    }
 
-    const rows = ctx.productRows.filter(r => tab === "all" ? true : tab === "open" ? r.open : !r.open);
+      const thead = document.querySelector("#productTable thead");
+      thead.innerHTML = `<tr>
+        <th class="center" title="Tick">📉</th>
+        <th>${t("th_prod")}</th>
+        <th class="num">${t("th_cant")}</th>
+        <th class="num">${t("th_val")}</th>
+        <th class="num">${t("th_inv")}</th>
+        <th class="num">${t("th_rec")}</th>
+        <th class="num">${t("th_div")}</th>
+        <th class="num">P/G</th>
+        <th class="num">%</th>
+      </tr>`;
 
-    rows.sort((a, b) => {
-       let valA = a[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
-       let valB = b[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
-       if (typeof valA === 'string') valA = valA.toLowerCase();
-       if (typeof valB === 'string') valB = valB.toLowerCase();
-       if (valA < valB) return currentSort.asc ? -1 : 1;
-       if (valA > valB) return currentSort.asc ? 1 : -1;
-       return 0;
-    });
+      const rows = ctx.productRows.filter(r => tab === "all" ? true : tab === "open" ? r.open : !r.open);
+      rows.sort((a, b) => {
+         let valA = a[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
+         let valB = b[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
+         if (typeof valA === 'string') valA = valA.toLowerCase();
+         if (typeof valB === 'string') valB = valB.toLowerCase();
+         if (valA < valB) return currentSort.asc ? -1 : 1;
+         if (valA > valB) return currentSort.asc ? 1 : -1;
+         return 0;
+      });
 
-    const tbody = document.querySelector("#productTable tbody");
-    if (tbody) {
+      const tbody = document.querySelector("#productTable tbody");
       tbody.innerHTML = rows.map(r => {
         const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
         const isChecked = !DG.tradeFilters.hidden.has(ticker);

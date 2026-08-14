@@ -199,8 +199,8 @@
   };
 
   DG.calculateFIFO = function (events) {
-    const inventory = new Map(); 
-    const closedLots = []; 
+    const inventory = new Map();
+    const closedLots = [];
     const chronologicalEvents = [...events].sort((a, b) => a.date - b.date);
 
     for (const ev of chronologicalEvents) {

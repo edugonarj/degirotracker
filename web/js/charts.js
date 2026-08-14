@@ -49,9 +49,12 @@
           if (DG.tradeFilters.hidden.has(ticker)) continue;
 
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
-          const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const price = ev.price.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+          const total = Math.abs(ev.qty * ev.price).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const cur = ev.tradeCur ? ` ${ev.tradeCur}` : "";
+
           const action = ev.side === 1 ? "Compra" : "Venta";
-          const desc = `${action} ${ticker}, ${qty}x${price}`;
+          const desc = `${action} ${ticker}, ${qty} x ${price}${cur} = ${total}${cur}`;
 
           let closestIdx = 0;
           let minDiff = Infinity;

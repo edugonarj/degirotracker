@@ -1,6 +1,6 @@
 /**
  * app.js — Orquestación del dashboard, cambio de idioma en header,
- * filtros/ordenación y módulo de Fiscalidad (FIFO) a prueba de fallos.
+ * y filtros/ordenación.
  */
 "use strict";
 
@@ -33,22 +33,12 @@
       tab_open: "Abiertas",
       tab_closed: "Cerradas",
       tab_all: "Todas",
-      tab_fiscal: "Fiscalidad (FIFO)",
       th_prod: "Producto",
       th_cant: "Cant.",
       th_val: "Valor",
       th_inv: "Invertido",
       th_rec: "Recibido",
-      th_div: "Div.",
-      f_year: "Año Fiscal:",
-      f_acq: "Total Adquisición",
-      f_trans: "Total Transmisión",
-      f_net: "Rendimiento Neto",
-      f_buy: "F. Compra",
-      f_sell: "F. Venta",
-      f_pbuy: "P. Compra",
-      f_psell: "P. Venta",
-      f_export: "Exportar CSV"
+      th_div: "Div."
     },
     en: {
       btn_lang: "ES",
@@ -72,22 +62,12 @@
       tab_open: "Open",
       tab_closed: "Closed",
       tab_all: "All",
-      tab_fiscal: "Tax (FIFO)",
       th_prod: "Product",
       th_cant: "Qty.",
       th_val: "Value",
       th_inv: "Invested",
       th_rec: "Received",
-      th_div: "Div.",
-      f_year: "Fiscal Year:",
-      f_acq: "Total Acquisition",
-      f_trans: "Total Transmission",
-      f_net: "Net Yield",
-      f_buy: "Buy Date",
-      f_sell: "Sell Date",
-      f_pbuy: "Buy Price",
-      f_psell: "Sell Price",
-      f_export: "Export CSV"
+      th_div: "Div."
     }
   };
 
@@ -102,8 +82,7 @@
     state: null, twr: null, valueSeries: null,
     benchSeries: new Map(), visibleBench: new Set(),
     priceProviders: new Map(), fxSeries: new Map(),
-    productRows: [], fifoRows: [], range: null, warnings: [], events: [],
-    fiscalYear: "Todos"
+    productRows: [], range: null, warnings: [], events: []
   };
 
   function setupHeaderLangButton() {
@@ -224,7 +203,6 @@
     ctx.productRows = DG.productPnL(st, ctx.priceProviders, ctx.fxSeries, lastDay);
     ctx.moneySeries = DG.buildMoneySeries(series, st.flows);
     ctx.range = { from: series[0]?.day, to: lastDay };
-    ctx.fifoRows = DG.calculateFIFO(ctx.events);
   }
 
   function render() {
@@ -277,12 +255,10 @@
       <button id="tabOpen" class="${currentTab === 'open' ? 'active' : ''}">${t("tab_open")}</button>
       <button id="tabClosed" class="${currentTab === 'closed' ? 'active' : ''}">${t("tab_closed")}</button>
       <button id="tabAll" class="${currentTab === 'all' ? 'active' : ''}">${t("tab_all")}</button>
-      <button id="tabFiscal" class="${currentTab === 'fiscal' ? 'active' : ''}">${t("tab_fiscal")}</button>
     `;
     $("tabOpen").onclick = () => renderTable("open");
     $("tabClosed").onclick = () => renderTable("closed");
     $("tabAll").onclick = () => renderTable("all");
-    $("tabFiscal").onclick = () => renderTable("fiscal");
   }
 
   function renderBenchToggles() {
@@ -369,32 +345,14 @@
   if ($("rangeEnd")) $("rangeEnd").addEventListener("change", onCustomRange);
 
   let currentTab = "open";
-  let currentSort = { col: 'pnl', asc: false }; 
-
-  function exportCSV(rows) {
-    let csv = "Producto,ISIN,Fecha Compra,Fecha Venta,Cantidad,Precio Compra,Precio Venta,P/G,Divisa\n";
-    rows.forEach(r => {
-      const pName = (ctx.state.products.get(r.isin) || {}).name || r.isin;
-      const buyD = r.buyDate ? DG.dayKey(r.buyDate) : "";
-      const sellD = r.sellDate ? DG.dayKey(r.sellDate) : "";
-      csv += `"${pName}",${r.isin},${buyD},${sellD},${r.qty},${r.buyPrice},${r.sellPrice},${r.pl},${r.cur}\n`;
-    });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", "fiscalidad_fifo.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
+  let currentSort = { col: 'pnl', asc: false };
 
   function renderTable(tab) {
     currentTab = tab;
     ensureTabs();
 
     const tableWrap = document.querySelector(".table-wrap");
-    if (!tableWrap) return; 
+    if (!tableWrap) return;
 
     let controls = $("tableControls");
     if (!controls && tableWrap.parentNode) {
@@ -402,14 +360,6 @@
       controls.id = "tableControls";
       controls.className = "table-controls";
       tableWrap.parentNode.insertBefore(controls, tableWrap);
-    }
-
-    let fControls = $("fiscalControls");
-    if (!fControls && tableWrap.parentNode) {
-      fControls = document.createElement("div");
-      fControls.id = "fiscalControls";
-      fControls.className = "fiscal-controls";
-      tableWrap.parentNode.insertBefore(fControls, tableWrap);
     }
 
     let thead = document.querySelector("#productTable thead");
@@ -424,163 +374,94 @@
     const tbody = document.querySelector("#productTable tbody");
     if (!tbody) return;
 
-    if (tab === "fiscal") {
-      if (controls) controls.style.display = "none";
-      if (fControls) fControls.style.display = "block";
-
-      const years = [...new Set(ctx.fifoRows.filter(r => r && r.sellDate).map(r => r.sellDate.getFullYear()))].sort((a, b) => b - a);
-      
-      if (fControls) {
-        fControls.innerHTML = `
-          <div class="fiscal-header">
-            <label><b>${t("f_year")}</b> 
-              <select id="fiscalYearSelect">
-                <option value="Todos">Todos</option>
-                ${years.map(y => `<option value="${y}" ${ctx.fiscalYear == y ? "selected" : ""}>${y}</option>`).join("")}
-              </select>
-            </label>
-            <button id="btnExportCSV" class="btn-secondary">${t("f_export")}</button>
-          </div>
-          <div class="cards" id="fiscalSummaryCards" style="margin-top:12px; margin-bottom: 0;"></div>
-        `;
-
-        $("fiscalYearSelect").onchange = (e) => {
-          ctx.fiscalYear = e.target.value;
-          renderTable("fiscal");
-        };
+    for (const [id, t_id] of [["tabOpen", "open"], ["tabClosed", "closed"], ["tabAll", "all"]]) {
+      if ($(id)) {
+         $(id).classList.toggle("active", t_id === tab);
       }
-
-      let filteredRows = ctx.fifoRows;
-      if (ctx.fiscalYear !== "Todos") {
-        filteredRows = ctx.fifoRows.filter(r => r.sellDate && r.sellDate.getFullYear().toString() === ctx.fiscalYear);
-      }
-
-      if ($("btnExportCSV")) $("btnExportCSV").onclick = () => exportCSV(filteredRows);
-
-      let totalAcq = 0, totalTrans = 0, netYield = 0;
-      filteredRows.forEach(r => {
-        totalAcq += r.qty * r.buyPrice;
-        totalTrans += r.qty * r.sellPrice;
-        netYield += r.pl;
-      });
-
-      if ($("fiscalSummaryCards")) {
-        $("fiscalSummaryCards").innerHTML = `
-          <div class="card"><div class="label">${t("f_acq")}</div><div class="value">${fmt(totalAcq, 2)}</div></div>
-          <div class="card"><div class="label">${t("f_trans")}</div><div class="value">${fmt(totalTrans, 2)}</div></div>
-          <div class="card"><div class="label">${t("f_net")}</div><div class="value ${netYield >= 0 ? 'pos' : 'neg'}">${fmt(netYield, 2)}</div></div>
-        `;
-      }
-
-      if (thead) {
-        thead.innerHTML = `<tr>
-          <th>${t("th_prod")}</th>
-          <th class="center">${t("f_buy")}</th>
-          <th class="center">${t("f_sell")}</th>
-          <th class="num">${t("th_cant")}</th>
-          <th class="num">${t("f_pbuy")}</th>
-          <th class="num">${t("f_psell")}</th>
-          <th class="num">P/G</th>
-          <th class="center">Div.</th>
-        </tr>`;
-      }
-
-      tbody.innerHTML = filteredRows.sort((a,b) => (b.sellDate || 0) - (a.sellDate || 0)).map(r => {
-        const pName = (ctx.state.products.get(r.isin) || {}).name || r.isin;
-        return `<tr>
-          <td class="prod" title="${r.isin}">${pName}</td>
-          <td class="center">${r.buyDate ? DG.dayKey(r.buyDate) : "—"}</td>
-          <td class="center">${r.sellDate ? DG.dayKey(r.sellDate) : "—"}</td>
-          <td class="num">${r.qty.toLocaleString(fmtLoc(), { maximumFractionDigits: 4 })}</td>
-          <td class="num">${r.buyPrice.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</td>
-          <td class="num">${r.sellPrice.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</td>
-          <td class="num ${r.pl >= 0 ? "pos" : "neg"}"><b>${(r.pl >= 0 ? "+" : "") + r.pl.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</b></td>
-          <td class="center">${r.cur}</td>
-        </tr>`;
-      }).join("");
-
-    } else {
-      if (fControls) fControls.style.display = "none";
-      if (controls) {
-        controls.style.display = "flex";
-        controls.innerHTML = `
-          <button id="btnCheckAll" class="btn-secondary">${t("hacer_ticks")}</button>
-          <button id="btnUncheckAll" class="btn-secondary">${t("quitar_ticks")}</button>
-          <span class="sort-label">${t("ord_por")}</span>
-          <button id="btnSortName" class="btn-secondary">${t("ord_alfabeto")}</button>
-          <button id="btnSortPnL" class="btn-secondary">${t("ord_pg")}</button>
-        `;
-
-        $("btnCheckAll").onclick = () => { DG.tradeFilters.hidden.clear(); renderTable(currentTab); drawPerf(); };
-        $("btnUncheckAll").onclick = () => {
-           ctx.productRows.forEach(r => {
-              const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
-              DG.tradeFilters.hidden.add(ticker);
-           });
-           renderTable(currentTab); drawPerf();
-        };
-        $("btnSortName").onclick = () => { 
-           if(currentSort.col === 'name') currentSort.asc = !currentSort.asc;
-           else { currentSort.col = 'name'; currentSort.asc = true; }
-           renderTable(currentTab); 
-        };
-        $("btnSortPnL").onclick = () => { 
-           if(currentSort.col === 'pnl') currentSort.asc = !currentSort.asc;
-           else { currentSort.col = 'pnl'; currentSort.asc = false; }
-           renderTable(currentTab); 
-        };
-      }
-
-      if (thead) {
-        thead.innerHTML = `<tr>
-          <th class="center" title="Tick">📉</th>
-          <th>${t("th_prod")}</th>
-          <th class="num">${t("th_cant")}</th>
-          <th class="num">${t("th_val")}</th>
-          <th class="num">${t("th_inv")}</th>
-          <th class="num">${t("th_rec")}</th>
-          <th class="num">${t("th_div")}</th>
-          <th class="num">P/G</th>
-          <th class="num">%</th>
-        </tr>`;
-      }
-
-      const rows = ctx.productRows.filter(r => tab === "all" ? true : tab === "open" ? r.open : !r.open);
-      rows.sort((a, b) => {
-         let valA = a[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
-         let valB = b[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
-         if (typeof valA === 'string') valA = valA.toLowerCase();
-         if (typeof valB === 'string') valB = valB.toLowerCase();
-         if (valA < valB) return currentSort.asc ? -1 : 1;
-         if (valA > valB) return currentSort.asc ? 1 : -1;
-         return 0;
-      });
-
-      tbody.innerHTML = rows.map(r => {
-        const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
-        const isChecked = !DG.tradeFilters.hidden.has(ticker);
-        return `
-        <tr>
-          <td class="center"><input type="checkbox" class="trade-toggle" data-ticker="${ticker}" ${isChecked ? "checked" : ""}></td>
-          <td class="prod" title="${r.isin}">${r.name}</td>
-          <td class="num">${r.open ? r.qty.toLocaleString(fmtLoc(), { maximumFractionDigits: 4 }) : "—"}</td>
-          <td class="num">${r.open ? fmt(r.value, 2) : "—"}</td>
-          <td class="num">${fmt(r.invested, 2)}</td>
-          <td class="num">${fmt(r.received, 2)}</td>
-          <td class="num">${r.dividends ? fmt(r.dividends, 2) : "—"}</td>
-          <td class="num ${r.pnl >= 0 ? "pos" : "neg"}"><b>${(r.pnl >= 0 ? "+" : "") + fmt(r.pnl, 2)}</b></td>
-          <td class="num ${r.pnl >= 0 ? "pos" : "neg"}">${PCT(r.pct)}</td>
-        </tr>`;
-      }).join("");
-
-      document.querySelectorAll(".trade-toggle").forEach(cb => {
-        cb.addEventListener("change", (e) => {
-           const ticker = e.target.dataset.ticker;
-           e.target.checked ? DG.tradeFilters.hidden.delete(ticker) : DG.tradeFilters.hidden.add(ticker);
-           drawPerf();
-        });
-      });
     }
+    if ($("tabOpen")) $("tabOpen").textContent = t("tab_open");
+    if ($("tabClosed")) $("tabClosed").textContent = t("tab_closed");
+    if ($("tabAll")) $("tabAll").textContent = t("tab_all");
+
+    if (controls) {
+      controls.style.display = "flex";
+      controls.innerHTML = `
+        <button id="btnCheckAll" class="btn-secondary">${t("hacer_ticks")}</button>
+        <button id="btnUncheckAll" class="btn-secondary">${t("quitar_ticks")}</button>
+        <span class="sort-label">${t("ord_por")}</span>
+        <button id="btnSortName" class="btn-secondary">${t("ord_alfabeto")}</button>
+        <button id="btnSortPnL" class="btn-secondary">${t("ord_pg")}</button>
+      `;
+
+      $("btnCheckAll").onclick = () => { DG.tradeFilters.hidden.clear(); renderTable(currentTab); drawPerf(); };
+      $("btnUncheckAll").onclick = () => {
+         ctx.productRows.forEach(r => {
+            const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
+            DG.tradeFilters.hidden.add(ticker);
+         });
+         renderTable(currentTab); drawPerf();
+      };
+      $("btnSortName").onclick = () => { 
+         if(currentSort.col === 'name') currentSort.asc = !currentSort.asc;
+         else { currentSort.col = 'name'; currentSort.asc = true; }
+         renderTable(currentTab); 
+      };
+      $("btnSortPnL").onclick = () => { 
+         if(currentSort.col === 'pnl') currentSort.asc = !currentSort.asc;
+         else { currentSort.col = 'pnl'; currentSort.asc = false; }
+         renderTable(currentTab); 
+      };
+    }
+
+    if (thead) {
+      thead.innerHTML = `<tr>
+        <th class="center" title="Tick">📉</th>
+        <th>${t("th_prod")}</th>
+        <th class="num">${t("th_cant")}</th>
+        <th class="num">${t("th_val")}</th>
+        <th class="num">${t("th_inv")}</th>
+        <th class="num">${t("th_rec")}</th>
+        <th class="num">${t("th_div")}</th>
+        <th class="num">P/G</th>
+        <th class="num">%</th>
+      </tr>`;
+    }
+
+    const rows = ctx.productRows.filter(r => tab === "all" ? true : tab === "open" ? r.open : !r.open);
+    rows.sort((a, b) => {
+       let valA = a[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
+       let valB = b[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
+       if (typeof valA === 'string') valA = valA.toLowerCase();
+       if (typeof valB === 'string') valB = valB.toLowerCase();
+       if (valA < valB) return currentSort.asc ? -1 : 1;
+       if (valA > valB) return currentSort.asc ? 1 : -1;
+       return 0;
+    });
+
+    tbody.innerHTML = rows.map(r => {
+      const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
+      const isChecked = !DG.tradeFilters.hidden.has(ticker);
+      return `
+      <tr>
+        <td class="center"><input type="checkbox" class="trade-toggle" data-ticker="${ticker}" ${isChecked ? "checked" : ""}></td>
+        <td class="prod" title="${r.isin}">${r.name}</td>
+        <td class="num">${r.open ? r.qty.toLocaleString(fmtLoc(), { maximumFractionDigits: 4 }) : "—"}</td>
+        <td class="num">${r.open ? fmt(r.value, 2) : "—"}</td>
+        <td class="num">${fmt(r.invested, 2)}</td>
+        <td class="num">${fmt(r.received, 2)}</td>
+        <td class="num">${r.dividends ? fmt(r.dividends, 2) : "—"}</td>
+        <td class="num ${r.pnl >= 0 ? "pos" : "neg"}"><b>${(r.pnl >= 0 ? "+" : "") + fmt(r.pnl, 2)}</b></td>
+        <td class="num ${r.pnl >= 0 ? "pos" : "neg"}">${PCT(r.pct)}</td>
+      </tr>`;
+    }).join("");
+
+    document.querySelectorAll(".trade-toggle").forEach(cb => {
+      cb.addEventListener("change", (e) => {
+         const ticker = e.target.dataset.ticker;
+         e.target.checked ? DG.tradeFilters.hidden.delete(ticker) : DG.tradeFilters.hidden.add(ticker);
+         drawPerf();
+      });
+    });
   }
 
   function renderWarnings() {

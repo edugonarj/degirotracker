@@ -225,7 +225,7 @@ tfoot td { font-weight: 700; border-top: 2px solid var(--dg-navy); }
 }
 
 /* =========================================
-   CONTROLES DE TABLA & FISCALIDAD
+   CONTROLES DE TABLA
    ========================================= */
 .table-controls {
   display: flex;
@@ -264,25 +264,4 @@ tfoot td { font-weight: 700; border-top: 2px solid var(--dg-navy); }
   cursor: pointer; 
   width: 16px; 
   height: 16px; 
-}
-
-/* Panel Fiscalidad */
-.fiscal-controls {
-  margin-bottom: 16px;
-  background: var(--dg-card);
-  padding: 14px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-}
-.fiscal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.fiscal-header select {
-  margin-left: 10px;
-  padding: 6px;
-  border: 1px solid var(--dg-border);
-  border-radius: 4px;
-  font-size: 13px;
 }

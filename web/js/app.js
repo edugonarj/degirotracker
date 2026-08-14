@@ -1,6 +1,6 @@
 /**
- * app.js — Orquestación: carga del archivo, métricas, render del dashboard,
- * internacionalización (ES/EN) integrada y módulo de Fiscalidad (FIFO).
+ * app.js — Orquestación del dashboard, cambio de idioma en header,
+ * filtros/ordenación y módulo de Fiscalidad (FIFO).
  */
 "use strict";
 
@@ -10,10 +10,9 @@
   
   DG.tradeFilters = DG.tradeFilters || { hidden: new Set() };
 
-  // ---------- Diccionario i18n ----------
   const i18n = {
     es: {
-      btn_lang: "🇬🇧 Switch to English",
+      btn_lang: "EN",
       val_cartera: "Valor de la cartera",
       efectivo: "efectivo: ",
       aportado: "Aportado neto",
@@ -34,7 +33,7 @@
       tab_open: "Abiertas",
       tab_closed: "Cerradas",
       tab_all: "Todas",
-      tab_fiscal: "Fiscalidad",
+      tab_fiscal: "Fiscalidad (FIFO)",
       th_prod: "Producto",
       th_cant: "Cant.",
       th_val: "Valor",
@@ -52,7 +51,7 @@
       f_export: "Exportar CSV"
     },
     en: {
-      btn_lang: "🇪🇸 Cambiar a Español",
+      btn_lang: "ES",
       val_cartera: "Portfolio Value",
       efectivo: "cash: ",
       aportado: "Net Contributed",
@@ -107,30 +106,24 @@
     fiscalYear: "Todos"
   };
 
-  function initLangToggle() {
-    if (!$("langToggleBtn")) {
+  function setupHeaderLangButton() {
+    let container = document.querySelector(".topbar-right");
+    if (!container) return;
+    if (!$("langHeaderBtn")) {
       const btn = document.createElement("button");
-      btn.id = "langToggleBtn";
-      btn.className = "btn-primary";
-      btn.style.position = "fixed";
-      btn.style.bottom = "24px";
-      btn.style.right = "24px";
-      btn.style.zIndex = "9999";
-      btn.style.boxShadow = "var(--shadow)";
+      btn.id = "langHeaderBtn";
+      btn.className = "lang-btn";
       btn.onclick = () => {
         lang = lang === "es" ? "en" : "es";
         btn.textContent = t("btn_lang");
         if (ctx.state) {
-          if ($("tableControls")) $("tableControls").remove(); 
-          if ($("fiscalControls")) $("fiscalControls").remove();
           render();
         }
       };
-      document.body.appendChild(btn);
+      container.appendChild(btn);
     }
-    $("langToggleBtn").textContent = t("btn_lang");
+    $("langHeaderBtn").textContent = t("btn_lang");
   }
-  document.addEventListener("DOMContentLoaded", initLangToggle);
 
   const dz = $("dropZone");
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("dragover"); });
@@ -150,13 +143,13 @@
   }
 
   async function handleFile(file) {
-    initLangToggle();
+    setupHeaderLangButton();
     try {
       log(`Leyendo ${file.name}…`);
       const buf = await file.arrayBuffer();
       const { events, warnings } = DG.parseAccountFile(buf);
       ctx.warnings = warnings;
-      ctx.events = events; 
+      ctx.events = events;
       
       log(`${events.length} movimientos. Reconstruyendo cartera…`);
       ctx.state = DG.replay(events);
@@ -235,13 +228,18 @@
   }
 
   function render() {
+    setupHeaderLangButton();
     const st = ctx.state;
     const series = ctx.valueSeries;
     const last = series[series.length - 1];
     const netDeposits = st.totals.deposits + st.totals.withdrawals;
     const totalGain = last.value - netDeposits;
     
-    $("topbarInfo").textContent = `${DG.dayKey(st.firstDate)} → ${last.day} · ${st.products.size} ${t("productos")}`;
+    let infoSpan = $("topbarInfoText");
+    if (!infoSpan) {
+      $("topbarInfo").innerHTML = `<span id="topbarInfoText"></span>`;
+    }
+    $("topbarInfoText").textContent = `${DG.dayKey(st.firstDate)} → ${last.day} · ${st.products.size} ${t("productos")}`;
 
     const cards = [
       { label: t("val_cartera"), value: fmt(last.value, 2), sub: t("efectivo") + fmt(last.cash, 2) },
@@ -255,7 +253,7 @@
       `<div class="card"${c.id ? ` id="${c.id}"` : ""}><div class="label">${c.label}</div><div class="value ${c.cls || ""}">${c.value}</div><div class="sub">${c.sub || ""}</div></div>`
     ).join("");
 
-    injectFiscalTab();
+    ensureTabs();
     renderBenchToggles();
     drawPerf();
     renderTable(currentTab || "open");
@@ -265,14 +263,19 @@
     $("rangeEnd").value = ctx.range.to;
   }
 
-  function injectFiscalTab() {
+  function ensureTabs() {
     const tabsContainer = document.querySelector(".tabs");
-    if (tabsContainer && !$("tabFiscal")) {
-      tabsContainer.insertAdjacentHTML('beforeend', `<button id="tabFiscal">${t("tab_fiscal")}</button>`);
-      $("tabFiscal").onclick = () => renderTable("fiscal");
-    } else if ($("tabFiscal")) {
-      $("tabFiscal").textContent = t("tab_fiscal");
-    }
+    if (!tabsContainer) return;
+    tabsContainer.innerHTML = `
+      <button id="tabOpen" class="${currentTab === 'open' ? 'active' : ''}">${t("tab_open")}</button>
+      <button id="tabClosed" class="${currentTab === 'closed' ? 'active' : ''}">${t("tab_closed")}</button>
+      <button id="tabAll" class="${currentTab === 'all' ? 'active' : ''}">${t("tab_all")}</button>
+      <button id="tabFiscal" class="${currentTab === 'fiscal' ? 'active' : ''}">${t("tab_fiscal")}</button>
+    `;
+    $("tabOpen").onclick = () => renderTable("open");
+    $("tabClosed").onclick = () => renderTable("closed");
+    $("tabAll").onclick = () => renderTable("all");
+    $("tabFiscal").onclick = () => renderTable("fiscal");
   }
 
   function renderBenchToggles() {
@@ -376,27 +379,29 @@
 
   function renderTable(tab) {
     currentTab = tab;
-    
-    if ($("tabOpen")) $("tabOpen").textContent = t("tab_open");
-    if ($("tabClosed")) $("tabClosed").textContent = t("tab_closed");
-    if ($("tabAll")) $("tabAll").textContent = t("tab_all");
-    
-    for (const [id, t_id] of [["tabOpen", "open"], ["tabClosed", "closed"], ["tabAll", "all"], ["tabFiscal", "fiscal"]]) {
-      if ($(id)) $(id).classList.toggle("active", t_id === tab);
-    }
+    ensureTabs();
 
     const tableWrap = document.querySelector(".table-wrap");
     
+    // Contenedores
+    let controls = $("tableControls");
+    if (!controls) {
+      controls = document.createElement("div");
+      controls.id = "tableControls";
+      controls.className = "table-controls";
+      tableWrap.parentNode.insertBefore(controls, tableWrap);
+    }
+
+    let fControls = $("fiscalControls");
+    if (!fControls) {
+      fControls = document.createElement("div");
+      fControls.id = "fiscalControls";
+      fControls.className = "fiscal-controls";
+      tableWrap.parentNode.insertBefore(fControls, tableWrap);
+    }
+
     if (tab === "fiscal") {
-      if ($("tableControls")) $("tableControls").style.display = "none";
-      
-      let fControls = $("fiscalControls");
-      if (!fControls) {
-        fControls = document.createElement("div");
-        fControls.id = "fiscalControls";
-        fControls.className = "fiscal-controls";
-        tableWrap.parentNode.insertBefore(fControls, tableWrap);
-      }
+      controls.style.display = "none";
       fControls.style.display = "block";
 
       const years = [...new Set(ctx.fifoRows.map(r => r.sellDate.getFullYear()))].sort((a, b) => b - a);
@@ -409,9 +414,9 @@
               ${years.map(y => `<option value="${y}" ${ctx.fiscalYear == y ? "selected" : ""}>${y}</option>`).join("")}
             </select>
           </label>
-          <button id="btnExportCSV" class="btn-primary" style="margin-top:0; padding:6px 16px;">${t("f_export")}</button>
+          <button id="btnExportCSV" class="btn-secondary">${t("f_export")}</button>
         </div>
-        <div class="cards" id="fiscalSummaryCards" style="margin-top:12px;"></div>
+        <div class="cards" id="fiscalSummaryCards" style="margin-top:12px; margin-bottom: 0;"></div>
       `;
 
       $("fiscalYearSelect").onchange = (e) => {
@@ -467,15 +472,7 @@
       }).join("");
 
     } else {
-      if ($("fiscalControls")) $("fiscalControls").style.display = "none";
-      
-      let controls = $("tableControls");
-      if (!controls) {
-        controls = document.createElement("div");
-        controls.id = "tableControls";
-        controls.className = "table-controls";
-        tableWrap.parentNode.insertBefore(controls, tableWrap);
-      }
+      fControls.style.display = "none";
       controls.style.display = "flex";
       controls.innerHTML = `
         <button id="btnCheckAll" class="btn-secondary">${t("hacer_ticks")}</button>
@@ -555,10 +552,6 @@
       });
     }
   }
-
-  if ($("tabOpen")) $("tabOpen").onclick = () => renderTable("open");
-  if ($("tabClosed")) $("tabClosed").onclick = () => renderTable("closed");
-  if ($("tabAll")) $("tabAll").onclick = () => renderTable("all");
 
   function renderWarnings() {
     const uniq = [...new Set(ctx.warnings)];

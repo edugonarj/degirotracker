@@ -7,6 +7,9 @@
 (function () {
   const DG = window.DG;
   const $ = id => document.getElementById(id);
+  
+  // Estado global para las acciones ocultas
+  DG.tradeFilters = DG.tradeFilters || { hidden: new Set() };
 
   const EUR = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
   const EUR0 = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
@@ -17,7 +20,7 @@
     benchSeries: new Map(), visibleBench: new Set(),
     priceProviders: new Map(), fxSeries: new Map(),
     productRows: [], range: null, warnings: [],
-    events: [] // <-- ALMACÉN NUEVO PARA LAS COMPRAS/VENTAS
+    events: [] 
   };
 
   // ---------- carga de archivo ----------
@@ -44,7 +47,7 @@
       const buf = await file.arrayBuffer();
       const { events, warnings } = DG.parseAccountFile(buf);
       ctx.warnings = warnings;
-      ctx.events = events; // Guardamos los eventos puros para el gráfico
+      ctx.events = events; 
       
       log(`${events.length} movimientos leídos. Reconstruyendo cartera…`);
       ctx.state = DG.replay(events);
@@ -190,7 +193,6 @@
   }
 
   function drawPerf() {
-    // AHORA PASAMOS ctx.events AL GRÁFICO
     DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range, ctx.events);
     DG.renderMoneyChart(ctx.moneySeries, ctx.range);
     updateRangeCards();
@@ -261,18 +263,82 @@
   $("rangeStart").addEventListener("change", onCustomRange);
   $("rangeEnd").addEventListener("change", onCustomRange);
 
+  // ---------- TABLA Y ORDENACIÓN ----------
   let currentTab = "open";
+  let currentSort = { col: 'pnl', asc: false }; // Por defecto: P/G de mayor a menor
+
   function renderTable(tab) {
     currentTab = tab;
     for (const [id, t] of [["tabOpen", "open"], ["tabClosed", "closed"], ["tabAll", "all"]]) {
       $(id).classList.toggle("active", t === tab);
     }
+
+    // Inyectar dinámicamente la cabecera del tick si no existe
+    const theadTr = document.querySelector("#productTable thead tr");
+    if (theadTr && !theadTr.dataset.modified) {
+       theadTr.insertAdjacentHTML('afterbegin', '<th class="center" title="Mostrar/ocultar operaciones en la gráfica">📉</th>');
+       theadTr.dataset.modified = "true";
+    }
+
+    // Inyectar controles de la tabla dinámicamente
+    let controls = $("tableControls");
+    if (!controls) {
+      controls = document.createElement("div");
+      controls.id = "tableControls";
+      controls.className = "table-controls";
+      controls.innerHTML = `
+        <button id="btnCheckAll" class="btn-secondary">Hacer todos los ticks</button>
+        <button id="btnUncheckAll" class="btn-secondary">Quitar todos los ticks</button>
+        <span class="sort-label">Ordenar por:</span>
+        <button id="btnSortName" class="btn-secondary">Alfabeto ↕</button>
+        <button id="btnSortPnL" class="btn-secondary">P/G ↕</button>
+      `;
+      const tableWrap = document.querySelector(".table-wrap");
+      if (tableWrap) tableWrap.parentNode.insertBefore(controls, tableWrap);
+
+      $("btnCheckAll").onclick = () => { DG.tradeFilters.hidden.clear(); renderTable(currentTab); drawPerf(); };
+      $("btnUncheckAll").onclick = () => {
+         ctx.productRows.forEach(r => {
+            const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
+            DG.tradeFilters.hidden.add(ticker);
+         });
+         renderTable(currentTab); drawPerf();
+      };
+      $("btnSortName").onclick = () => { 
+         if(currentSort.col === 'name') currentSort.asc = !currentSort.asc;
+         else { currentSort.col = 'name'; currentSort.asc = true; }
+         renderTable(currentTab); 
+      };
+      $("btnSortPnL").onclick = () => { 
+         if(currentSort.col === 'pnl') currentSort.asc = !currentSort.asc;
+         else { currentSort.col = 'pnl'; currentSort.asc = false; }
+         renderTable(currentTab); 
+      };
+    }
+
     const rows = ctx.productRows.filter(r =>
       tab === "all" ? true : tab === "open" ? r.open : !r.open
     );
+
+    // Aplicar ordenación
+    rows.sort((a, b) => {
+       let valA = a[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
+       let valB = b[currentSort.col] || (currentSort.col === 'name' ? "" : 0);
+       if (typeof valA === 'string') valA = valA.toLowerCase();
+       if (typeof valB === 'string') valB = valB.toLowerCase();
+       
+       if (valA < valB) return currentSort.asc ? -1 : 1;
+       if (valA > valB) return currentSort.asc ? 1 : -1;
+       return 0;
+    });
+
     const tbody = document.querySelector("#productTable tbody");
-    tbody.innerHTML = rows.map(r => `
+    tbody.innerHTML = rows.map(r => {
+      const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
+      const isChecked = !DG.tradeFilters.hidden.has(ticker);
+      return `
       <tr>
+        <td class="center"><input type="checkbox" class="trade-toggle" data-ticker="${ticker}" ${isChecked ? "checked" : ""}></td>
         <td class="prod" title="${r.isin}">${r.name}</td>
         <td class="num">${r.open ? r.qty.toLocaleString("es-ES", { maximumFractionDigits: 4 }) : "—"}</td>
         <td class="num">${r.open ? EUR.format(r.value) : "—"}</td>
@@ -281,8 +347,23 @@
         <td class="num">${r.dividends ? EUR.format(r.dividends) : "—"}</td>
         <td class="num ${r.pnl >= 0 ? "pos" : "neg"}"><b>${(r.pnl >= 0 ? "+" : "") + EUR.format(r.pnl)}</b></td>
         <td class="num ${r.pnl >= 0 ? "pos" : "neg"}">${PCT(r.pct)}</td>
-      </tr>`).join("");
+      </tr>`;
+    }).join("");
+
+    // Eventos de los checkboxes para actualizar la gráfica
+    document.querySelectorAll(".trade-toggle").forEach(cb => {
+      cb.addEventListener("change", (e) => {
+         const ticker = e.target.dataset.ticker;
+         if (e.target.checked) {
+             DG.tradeFilters.hidden.delete(ticker);
+         } else {
+             DG.tradeFilters.hidden.add(ticker);
+         }
+         drawPerf(); // Re-dibuja al instante
+      });
+    });
   }
+
   $("tabOpen").onclick = () => renderTable("open");
   $("tabClosed").onclick = () => renderTable("closed");
   $("tabAll").onclick = () => renderTable("all");

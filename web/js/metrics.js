@@ -7,7 +7,6 @@
 (function () {
   const DG = window.DG;
 
-  /** Lista de días naturales entre dos fechas (incluidas). */
   function dayRange(from, to) {
     const out = [];
     const d = new Date(from);
@@ -18,11 +17,6 @@
     return out;
   }
 
-  /**
-   * Convierte a EUR los movimientos pendientes en divisa extranjera
-   * (dividendos y trades sin leg FX) usando las series FX y los aplica
-   * a los agregados por producto y totales. Llamar una sola vez.
-   */
   DG.resolvePending = function (state, fxSeries) {
     for (const pend of state.totals.divPending) {
       const fx = DG.seriesAt(fxSeries.get(pend.cur), DG.dayKey(pend.date));
@@ -39,9 +33,6 @@
     state.totals.divPending = [];
   };
 
-  /**
-   * Construye la serie diaria de valor de cartera en EUR.
-   */
   DG.buildValueSeries = function (state, priceProviders, fxSeries) {
     const today = new Date();
     const endDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
@@ -89,9 +80,6 @@
     return { series, missingPrices: [...missingPrices] };
   };
 
-  /**
-   * TWR diaria encadenada, neutralizando flujos externos con lógica simétrica.
-   */
   DG.buildTWR = function (series, flows) {
     const flowByDay = new Map();
     for (const f of flows) {
@@ -104,13 +92,7 @@
     for (const pt of series) {
       if (prev !== null) {
         const flow = flowByDay.get(pt.day) || 0;
-        
-        // Tratamos los depósitos (flow > 0) y retiradas (flow < 0) igual.
-        // Asumimos que el movimiento de capital se efectúa al inicio del día.
-        // Así, la base sobre la que se calcula la rentabilidad del día actual
-        // ya incluye (o descuenta) el capital movido.
         const base = prev + flow; 
-        
         if (base > 1e-9) {
           idx *= pt.value / base;
         }
@@ -121,7 +103,6 @@
     return out;
   };
 
-  /** XIRR (rentabilidad anualizada ponderada por dinero) por bisección. */
   DG.xirr = function (flows, finalValue, finalDate) {
     const cfs = flows.map(f => ({ t: f.date.getTime(), v: -f.amount }));
     cfs.push({ t: finalDate.getTime(), v: finalValue });
@@ -137,7 +118,6 @@
     return (lo + hi) / 2;
   };
 
-  /** P/G por producto con valor actual. */
   DG.productPnL = function (state, priceProviders, fxSeries, lastDay) {
     const rows = [];
     for (const p of state.products.values()) {
@@ -175,7 +155,6 @@
     return rows;
   };
 
-  /** Métricas del rango de fechas filtrado. */
   DG.rangeMetrics = function (series, twr, flows, range) {
     const pts = series.filter(p => p.day >= range.from && p.day <= range.to);
     if (pts.length < 2) return null;
@@ -198,7 +177,6 @@
     return { twrPeriod, xirr: irr, periodMoney, years, startValue: first.value, endValue: last.value };
   };
 
-  /** Serie mensual: aportación neta acumulada vs valor de cartera. */
   DG.buildMoneySeries = function (series, flows) {
     const byMonth = new Map();
     for (const f of flows) {
@@ -218,5 +196,50 @@
       const value = byMonth.get(m).value;
       return { month: m, netCum: cum, value, gain: value != null ? value - cum : null };
     });
+  };
+
+  DG.calculateFIFO = function (events) {
+    const inventory = new Map(); 
+    const closedLots = []; 
+    const chronologicalEvents = [...events].sort((a, b) => a.date - b.date);
+
+    for (const ev of chronologicalEvents) {
+      if (ev.type !== "trade") continue;
+
+      const isin = ev.isin;
+      if (!inventory.has(isin)) inventory.set(isin, []);
+      const lots = inventory.get(isin);
+      let qty = Math.abs(ev.qty);
+
+      if (ev.side === 1) {
+        lots.push({ date: ev.date, qty: qty, price: ev.price, cur: ev.tradeCur });
+      } else if (ev.side === -1) {
+        let remainingToSell = qty;
+
+        while (remainingToSell > 1e-9 && lots.length > 0) {
+          const firstLot = lots[0];
+          const soldFromLot = Math.min(remainingToSell, firstLot.qty);
+
+          closedLots.push({
+            isin: isin,
+            buyDate: firstLot.date,
+            sellDate: ev.date,
+            qty: soldFromLot,
+            buyPrice: firstLot.price,
+            sellPrice: ev.price,
+            cur: ev.tradeCur,
+            pl: (ev.price - firstLot.price) * soldFromLot
+          });
+
+          firstLot.qty -= soldFromLot;
+          remainingToSell -= soldFromLot;
+
+          if (firstLot.qty <= 1e-9) {
+            lots.shift();
+          }
+        }
+      }
+    }
+    return closedLots;
   };
 })();

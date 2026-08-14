@@ -201,24 +201,36 @@
   DG.calculateFIFO = function (events) {
     const inventory = new Map();
     const closedLots = [];
-    const chronologicalEvents = [...events].sort((a, b) => a.date - b.date);
+    
+    // FILTRO DE SEGURIDAD: Solo operaciones de compraventa que tengan fecha válida.
+    const chronologicalEvents = [...events]
+       .filter(e => e && e.type === "trade" && e.date)
+       .sort((a, b) => a.date - b.date);
 
     for (const ev of chronologicalEvents) {
-      if (ev.type !== "trade") continue;
-
       const isin = ev.isin;
+      if (!isin) continue;
+      
       if (!inventory.has(isin)) inventory.set(isin, []);
       const lots = inventory.get(isin);
-      let qty = Math.abs(ev.qty);
+      let qty = Math.abs(ev.qty || 0);
 
       if (ev.side === 1) {
-        lots.push({ date: ev.date, qty: qty, price: ev.price, cur: ev.tradeCur });
+        lots.push({ date: ev.date, qty: qty, price: ev.price || 0, cur: ev.tradeCur });
       } else if (ev.side === -1) {
         let remainingToSell = qty;
+        let safetyCounter = 0;
 
-        while (remainingToSell > 1e-9 && lots.length > 0) {
+        // BUCLE SEGURO: Previene cuelgues si las cantidades son anómalas (ej. 0 o NaN)
+        while (remainingToSell > 1e-9 && lots.length > 0 && safetyCounter < 1000) {
+          safetyCounter++;
           const firstLot = lots[0];
           const soldFromLot = Math.min(remainingToSell, firstLot.qty);
+
+          if (soldFromLot <= 0) { 
+             lots.shift(); 
+             continue; 
+          }
 
           closedLots.push({
             isin: isin,
@@ -226,9 +238,9 @@
             sellDate: ev.date,
             qty: soldFromLot,
             buyPrice: firstLot.price,
-            sellPrice: ev.price,
+            sellPrice: ev.price || 0,
             cur: ev.tradeCur,
-            pl: (ev.price - firstLot.price) * soldFromLot
+            pl: ((ev.price || 0) - firstLot.price) * soldFromLot
           });
 
           firstLot.qty -= soldFromLot;

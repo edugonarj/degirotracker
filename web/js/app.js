@@ -1,6 +1,6 @@
 /**
  * app.js — Orquestación del dashboard, cambio de idioma en header,
- * filtros/ordenación y módulo de Fiscalidad (FIFO).
+ * filtros/ordenación y módulo de Fiscalidad (FIFO) a prueba de fallos.
  */
 "use strict";
 
@@ -116,9 +116,7 @@
       btn.onclick = () => {
         lang = lang === "es" ? "en" : "es";
         btn.textContent = t("btn_lang");
-        if (ctx.state) {
-          render();
-        }
+        if (ctx.state) render();
       };
       container.appendChild(btn);
     }
@@ -137,9 +135,11 @@
     if (e.target.files[0]) handleFile(e.target.files[0]);
   });
 
-  function log(msg) {
+  function log(msg, isError = false) {
     $("loadStatus").classList.remove("hidden");
     $("loadLog").textContent = msg;
+    const spinner = document.querySelector(".spinner");
+    if (spinner) spinner.style.display = isError ? "none" : "block";
   }
 
   async function handleFile(file) {
@@ -164,7 +164,7 @@
       $("dashboard").classList.remove("hidden");
     } catch (err) {
       console.error(err);
-      log("Error al procesar el archivo.");
+      log(`Error CRÍTICO al cargar: ${err.message}. Pulsa F12 para ver la consola.`, true);
     }
   }
 
@@ -220,10 +220,10 @@
     const { series, missingPrices } = DG.buildValueSeries(st, ctx.priceProviders, ctx.fxSeries);
     ctx.valueSeries = series;
     ctx.twr = DG.buildTWR(series, st.flows);
-    const lastDay = series[series.length - 1].day;
+    const lastDay = series[series.length > 0 ? series.length - 1 : 0]?.day || DG.dayKey(new Date());
     ctx.productRows = DG.productPnL(st, ctx.priceProviders, ctx.fxSeries, lastDay);
     ctx.moneySeries = DG.buildMoneySeries(series, st.flows);
-    ctx.range = { from: series[0].day, to: lastDay };
+    ctx.range = { from: series[0]?.day, to: lastDay };
     ctx.fifoRows = DG.calculateFIFO(ctx.events);
   }
 
@@ -231,15 +231,19 @@
     setupHeaderLangButton();
     const st = ctx.state;
     const series = ctx.valueSeries;
+    if (!series || series.length === 0) return;
+    
     const last = series[series.length - 1];
     const netDeposits = st.totals.deposits + st.totals.withdrawals;
     const totalGain = last.value - netDeposits;
     
     let infoSpan = $("topbarInfoText");
-    if (!infoSpan) {
+    if (!infoSpan && $("topbarInfo")) {
       $("topbarInfo").innerHTML = `<span id="topbarInfoText"></span>`;
     }
-    $("topbarInfoText").textContent = `${DG.dayKey(st.firstDate)} → ${last.day} · ${st.products.size} ${t("productos")}`;
+    if ($("topbarInfoText")) {
+      $("topbarInfoText").textContent = `${DG.dayKey(st.firstDate)} → ${last.day} · ${st.products.size} ${t("productos")}`;
+    }
 
     const cards = [
       { label: t("val_cartera"), value: fmt(last.value, 2), sub: t("efectivo") + fmt(last.cash, 2) },
@@ -249,9 +253,12 @@
       { id: "cardTwr", label: t("twr"), value: "—", sub: "" },
       { label: t("divs"), value: fmt(st.totals.dividendsEUR + st.totals.lendingEUR, 0), sub: t("comisiones") + fmt(st.totals.fees, 0) },
     ];
-    $("summaryCards").innerHTML = cards.map(c =>
-      `<div class="card"${c.id ? ` id="${c.id}"` : ""}><div class="label">${c.label}</div><div class="value ${c.cls || ""}">${c.value}</div><div class="sub">${c.sub || ""}</div></div>`
-    ).join("");
+    
+    if ($("summaryCards")) {
+      $("summaryCards").innerHTML = cards.map(c =>
+        `<div class="card"${c.id ? ` id="${c.id}"` : ""}><div class="label">${c.label}</div><div class="value ${c.cls || ""}">${c.value}</div><div class="sub">${c.sub || ""}</div></div>`
+      ).join("");
+    }
 
     ensureTabs();
     renderBenchToggles();
@@ -259,8 +266,8 @@
     renderTable(currentTab || "open");
     renderWarnings();
 
-    $("rangeStart").value = ctx.range.from;
-    $("rangeEnd").value = ctx.range.to;
+    if ($("rangeStart")) $("rangeStart").value = ctx.range.from;
+    if ($("rangeEnd")) $("rangeEnd").value = ctx.range.to;
   }
 
   function ensureTabs() {
@@ -280,6 +287,7 @@
 
   function renderBenchToggles() {
     const el = $("benchToggles");
+    if (!el) return;
     el.innerHTML = "";
     for (const b of DG.BENCHMARKS) {
       const s = ctx.benchSeries.get(b.id);
@@ -299,9 +307,11 @@
   }
 
   function drawPerf() {
-    DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range, ctx.events);
-    DG.renderMoneyChart(ctx.moneySeries, ctx.range);
-    updateRangeCards();
+    if (ctx.twr && ctx.benchSeries && ctx.range) {
+       DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range, ctx.events);
+       DG.renderMoneyChart(ctx.moneySeries, ctx.range);
+       updateRangeCards();
+    }
   }
 
   function updateRangeCards() {
@@ -342,21 +352,21 @@
       }
       const from = fromD.toISOString().slice(0, 10);
       ctx.range = { from: from < ctx.valueSeries[0].day ? ctx.valueSeries[0].day : from, to };
-      $("rangeStart").value = ctx.range.from;
-      $("rangeEnd").value = ctx.range.to;
+      if ($("rangeStart")) $("rangeStart").value = ctx.range.from;
+      if ($("rangeEnd")) $("rangeEnd").value = ctx.range.to;
       drawPerf();
     };
   });
 
   function onCustomRange() {
-    const from = $("rangeStart").value, to = $("rangeEnd").value;
+    const from = $("rangeStart")?.value, to = $("rangeEnd")?.value;
     if (!from || !to || from >= to) return;
     document.querySelectorAll("#presetBtns button").forEach(b => b.classList.remove("active"));
     ctx.range = { from, to };
     drawPerf();
   }
-  $("rangeStart").addEventListener("change", onCustomRange);
-  $("rangeEnd").addEventListener("change", onCustomRange);
+  if ($("rangeStart")) $("rangeStart").addEventListener("change", onCustomRange);
+  if ($("rangeEnd")) $("rangeEnd").addEventListener("change", onCustomRange);
 
   let currentTab = "open";
   let currentSort = { col: 'pnl', asc: false }; 
@@ -365,7 +375,9 @@
     let csv = "Producto,ISIN,Fecha Compra,Fecha Venta,Cantidad,Precio Compra,Precio Venta,P/G,Divisa\n";
     rows.forEach(r => {
       const pName = (ctx.state.products.get(r.isin) || {}).name || r.isin;
-      csv += `"${pName}",${r.isin},${DG.dayKey(r.buyDate)},${DG.dayKey(r.sellDate)},${r.qty},${r.buyPrice},${r.sellPrice},${r.pl},${r.cur}\n`;
+      const buyD = r.buyDate ? DG.dayKey(r.buyDate) : "";
+      const sellD = r.sellDate ? DG.dayKey(r.sellDate) : "";
+      csv += `"${pName}",${r.isin},${buyD},${sellD},${r.qty},${r.buyPrice},${r.sellPrice},${r.pl},${r.cur}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -382,10 +394,10 @@
     ensureTabs();
 
     const tableWrap = document.querySelector(".table-wrap");
-    
-    // Contenedores
+    if (!tableWrap) return; 
+
     let controls = $("tableControls");
-    if (!controls) {
+    if (!controls && tableWrap.parentNode) {
       controls = document.createElement("div");
       controls.id = "tableControls";
       controls.className = "table-controls";
@@ -393,43 +405,57 @@
     }
 
     let fControls = $("fiscalControls");
-    if (!fControls) {
+    if (!fControls && tableWrap.parentNode) {
       fControls = document.createElement("div");
       fControls.id = "fiscalControls";
       fControls.className = "fiscal-controls";
       tableWrap.parentNode.insertBefore(fControls, tableWrap);
     }
 
+    let thead = document.querySelector("#productTable thead");
+    if (!thead) {
+      const table = document.getElementById("productTable");
+      if (table) {
+        thead = document.createElement("thead");
+        table.insertBefore(thead, table.firstChild);
+      }
+    }
+
+    const tbody = document.querySelector("#productTable tbody");
+    if (!tbody) return;
+
     if (tab === "fiscal") {
-      controls.style.display = "none";
-      fControls.style.display = "block";
+      if (controls) controls.style.display = "none";
+      if (fControls) fControls.style.display = "block";
 
-      const years = [...new Set(ctx.fifoRows.map(r => r.sellDate.getFullYear()))].sort((a, b) => b - a);
+      const years = [...new Set(ctx.fifoRows.filter(r => r && r.sellDate).map(r => r.sellDate.getFullYear()))].sort((a, b) => b - a);
       
-      fControls.innerHTML = `
-        <div class="fiscal-header">
-          <label><b>${t("f_year")}</b> 
-            <select id="fiscalYearSelect">
-              <option value="Todos">Todos</option>
-              ${years.map(y => `<option value="${y}" ${ctx.fiscalYear == y ? "selected" : ""}>${y}</option>`).join("")}
-            </select>
-          </label>
-          <button id="btnExportCSV" class="btn-secondary">${t("f_export")}</button>
-        </div>
-        <div class="cards" id="fiscalSummaryCards" style="margin-top:12px; margin-bottom: 0;"></div>
-      `;
+      if (fControls) {
+        fControls.innerHTML = `
+          <div class="fiscal-header">
+            <label><b>${t("f_year")}</b> 
+              <select id="fiscalYearSelect">
+                <option value="Todos">Todos</option>
+                ${years.map(y => `<option value="${y}" ${ctx.fiscalYear == y ? "selected" : ""}>${y}</option>`).join("")}
+              </select>
+            </label>
+            <button id="btnExportCSV" class="btn-secondary">${t("f_export")}</button>
+          </div>
+          <div class="cards" id="fiscalSummaryCards" style="margin-top:12px; margin-bottom: 0;"></div>
+        `;
 
-      $("fiscalYearSelect").onchange = (e) => {
-        ctx.fiscalYear = e.target.value;
-        renderTable("fiscal");
-      };
+        $("fiscalYearSelect").onchange = (e) => {
+          ctx.fiscalYear = e.target.value;
+          renderTable("fiscal");
+        };
+      }
 
       let filteredRows = ctx.fifoRows;
       if (ctx.fiscalYear !== "Todos") {
-        filteredRows = ctx.fifoRows.filter(r => r.sellDate.getFullYear().toString() === ctx.fiscalYear);
+        filteredRows = ctx.fifoRows.filter(r => r.sellDate && r.sellDate.getFullYear().toString() === ctx.fiscalYear);
       }
 
-      $("btnExportCSV").onclick = () => exportCSV(filteredRows);
+      if ($("btnExportCSV")) $("btnExportCSV").onclick = () => exportCSV(filteredRows);
 
       let totalAcq = 0, totalTrans = 0, netYield = 0;
       filteredRows.forEach(r => {
@@ -438,31 +464,33 @@
         netYield += r.pl;
       });
 
-      $("fiscalSummaryCards").innerHTML = `
-        <div class="card"><div class="label">${t("f_acq")}</div><div class="value">${fmt(totalAcq, 2)}</div></div>
-        <div class="card"><div class="label">${t("f_trans")}</div><div class="value">${fmt(totalTrans, 2)}</div></div>
-        <div class="card"><div class="label">${t("f_net")}</div><div class="value ${netYield >= 0 ? 'pos' : 'neg'}">${fmt(netYield, 2)}</div></div>
-      `;
+      if ($("fiscalSummaryCards")) {
+        $("fiscalSummaryCards").innerHTML = `
+          <div class="card"><div class="label">${t("f_acq")}</div><div class="value">${fmt(totalAcq, 2)}</div></div>
+          <div class="card"><div class="label">${t("f_trans")}</div><div class="value">${fmt(totalTrans, 2)}</div></div>
+          <div class="card"><div class="label">${t("f_net")}</div><div class="value ${netYield >= 0 ? 'pos' : 'neg'}">${fmt(netYield, 2)}</div></div>
+        `;
+      }
 
-      const thead = document.querySelector("#productTable thead");
-      thead.innerHTML = `<tr>
-        <th>${t("th_prod")}</th>
-        <th class="center">${t("f_buy")}</th>
-        <th class="center">${t("f_sell")}</th>
-        <th class="num">${t("th_cant")}</th>
-        <th class="num">${t("f_pbuy")}</th>
-        <th class="num">${t("f_psell")}</th>
-        <th class="num">P/G</th>
-        <th class="center">Div.</th>
-      </tr>`;
+      if (thead) {
+        thead.innerHTML = `<tr>
+          <th>${t("th_prod")}</th>
+          <th class="center">${t("f_buy")}</th>
+          <th class="center">${t("f_sell")}</th>
+          <th class="num">${t("th_cant")}</th>
+          <th class="num">${t("f_pbuy")}</th>
+          <th class="num">${t("f_psell")}</th>
+          <th class="num">P/G</th>
+          <th class="center">Div.</th>
+        </tr>`;
+      }
 
-      const tbody = document.querySelector("#productTable tbody");
-      tbody.innerHTML = filteredRows.sort((a,b) => b.sellDate - a.sellDate).map(r => {
+      tbody.innerHTML = filteredRows.sort((a,b) => (b.sellDate || 0) - (a.sellDate || 0)).map(r => {
         const pName = (ctx.state.products.get(r.isin) || {}).name || r.isin;
         return `<tr>
           <td class="prod" title="${r.isin}">${pName}</td>
-          <td class="center">${DG.dayKey(r.buyDate)}</td>
-          <td class="center">${DG.dayKey(r.sellDate)}</td>
+          <td class="center">${r.buyDate ? DG.dayKey(r.buyDate) : "—"}</td>
+          <td class="center">${r.sellDate ? DG.dayKey(r.sellDate) : "—"}</td>
           <td class="num">${r.qty.toLocaleString(fmtLoc(), { maximumFractionDigits: 4 })}</td>
           <td class="num">${r.buyPrice.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</td>
           <td class="num">${r.sellPrice.toLocaleString(fmtLoc(), { minimumFractionDigits: 2 })}</td>
@@ -472,47 +500,50 @@
       }).join("");
 
     } else {
-      fControls.style.display = "none";
-      controls.style.display = "flex";
-      controls.innerHTML = `
-        <button id="btnCheckAll" class="btn-secondary">${t("hacer_ticks")}</button>
-        <button id="btnUncheckAll" class="btn-secondary">${t("quitar_ticks")}</button>
-        <span class="sort-label">${t("ord_por")}</span>
-        <button id="btnSortName" class="btn-secondary">${t("ord_alfabeto")}</button>
-        <button id="btnSortPnL" class="btn-secondary">${t("ord_pg")}</button>
-      `;
+      if (fControls) fControls.style.display = "none";
+      if (controls) {
+        controls.style.display = "flex";
+        controls.innerHTML = `
+          <button id="btnCheckAll" class="btn-secondary">${t("hacer_ticks")}</button>
+          <button id="btnUncheckAll" class="btn-secondary">${t("quitar_ticks")}</button>
+          <span class="sort-label">${t("ord_por")}</span>
+          <button id="btnSortName" class="btn-secondary">${t("ord_alfabeto")}</button>
+          <button id="btnSortPnL" class="btn-secondary">${t("ord_pg")}</button>
+        `;
 
-      $("btnCheckAll").onclick = () => { DG.tradeFilters.hidden.clear(); renderTable(currentTab); drawPerf(); };
-      $("btnUncheckAll").onclick = () => {
-         ctx.productRows.forEach(r => {
-            const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
-            DG.tradeFilters.hidden.add(ticker);
-         });
-         renderTable(currentTab); drawPerf();
-      };
-      $("btnSortName").onclick = () => { 
-         if(currentSort.col === 'name') currentSort.asc = !currentSort.asc;
-         else { currentSort.col = 'name'; currentSort.asc = true; }
-         renderTable(currentTab); 
-      };
-      $("btnSortPnL").onclick = () => { 
-         if(currentSort.col === 'pnl') currentSort.asc = !currentSort.asc;
-         else { currentSort.col = 'pnl'; currentSort.asc = false; }
-         renderTable(currentTab); 
-      };
+        $("btnCheckAll").onclick = () => { DG.tradeFilters.hidden.clear(); renderTable(currentTab); drawPerf(); };
+        $("btnUncheckAll").onclick = () => {
+           ctx.productRows.forEach(r => {
+              const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
+              DG.tradeFilters.hidden.add(ticker);
+           });
+           renderTable(currentTab); drawPerf();
+        };
+        $("btnSortName").onclick = () => { 
+           if(currentSort.col === 'name') currentSort.asc = !currentSort.asc;
+           else { currentSort.col = 'name'; currentSort.asc = true; }
+           renderTable(currentTab); 
+        };
+        $("btnSortPnL").onclick = () => { 
+           if(currentSort.col === 'pnl') currentSort.asc = !currentSort.asc;
+           else { currentSort.col = 'pnl'; currentSort.asc = false; }
+           renderTable(currentTab); 
+        };
+      }
 
-      const thead = document.querySelector("#productTable thead");
-      thead.innerHTML = `<tr>
-        <th class="center" title="Tick">📉</th>
-        <th>${t("th_prod")}</th>
-        <th class="num">${t("th_cant")}</th>
-        <th class="num">${t("th_val")}</th>
-        <th class="num">${t("th_inv")}</th>
-        <th class="num">${t("th_rec")}</th>
-        <th class="num">${t("th_div")}</th>
-        <th class="num">P/G</th>
-        <th class="num">%</th>
-      </tr>`;
+      if (thead) {
+        thead.innerHTML = `<tr>
+          <th class="center" title="Tick">📉</th>
+          <th>${t("th_prod")}</th>
+          <th class="num">${t("th_cant")}</th>
+          <th class="num">${t("th_val")}</th>
+          <th class="num">${t("th_inv")}</th>
+          <th class="num">${t("th_rec")}</th>
+          <th class="num">${t("th_div")}</th>
+          <th class="num">P/G</th>
+          <th class="num">%</th>
+        </tr>`;
+      }
 
       const rows = ctx.productRows.filter(r => tab === "all" ? true : tab === "open" ? r.open : !r.open);
       rows.sort((a, b) => {
@@ -525,7 +556,6 @@
          return 0;
       });
 
-      const tbody = document.querySelector("#productTable tbody");
       tbody.innerHTML = rows.map(r => {
         const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[r.isin]) ? DG.ISIN_TO_YAHOO[r.isin] : r.isin;
         const isChecked = !DG.tradeFilters.hidden.has(ticker);
@@ -556,7 +586,7 @@
   function renderWarnings() {
     const uniq = [...new Set(ctx.warnings)];
     if (!uniq.length) return;
-    $("warnPanel").classList.remove("hidden");
-    $("warnList").innerHTML = uniq.map(w => `<li>${w}</li>`).join("");
+    if ($("warnPanel")) $("warnPanel").classList.remove("hidden");
+    if ($("warnList")) $("warnList").innerHTML = uniq.map(w => `<li>${w}</li>`).join("");
   }
 })();

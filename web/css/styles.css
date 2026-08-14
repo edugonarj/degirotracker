@@ -40,7 +40,28 @@ body {
 .brand { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
 .brand-de { color: #fff; }
 .brand-tr { color: var(--dg-blue); margin-left: 6px; font-weight: 400; }
-.topbar-right { font-size: 13px; color: #bcd3e5; }
+.topbar-right { 
+  display: flex; 
+  align-items: center; 
+  gap: 16px; 
+  font-size: 13px; 
+  color: #bcd3e5; 
+}
+
+.lang-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.lang-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
 
 main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
 
@@ -263,5 +284,5 @@ tfoot td { font-weight: 700; border-top: 2px solid var(--dg-navy); }
   padding: 6px;
   border: 1px solid var(--dg-border);
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 13px;
 }

@@ -1,6 +1,6 @@
 /**
  * app.js — Orquestación del dashboard, cambio de idioma en header,
- * y filtros/ordenación.
+ * y filtros/ordenación en la tabla de acciones.
  */
 "use strict";
 
@@ -143,7 +143,7 @@
       $("dashboard").classList.remove("hidden");
     } catch (err) {
       console.error(err);
-      log(`Error CRÍTICO al cargar: ${err.message}. Pulsa F12 para ver la consola.`, true);
+      log(`Error al cargar: ${err.message}`, true);
     }
   }
 

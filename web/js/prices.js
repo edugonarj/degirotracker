@@ -125,14 +125,26 @@
 
   const cache = new Map(); 
 
+  // CORTAFUEGOS: Añadido timeout de 6s para evitar carga infinita
   async function fetchJSON(url) {
     let lastErr;
     for (const p of PROXIES) {
       try {
-        const res = await fetch(p(url), { headers: { Accept: "application/json" } });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000); 
+        
+        const res = await fetch(p(url), { 
+            headers: { Accept: "application/json" },
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
         if (!res.ok) throw new Error("HTTP " + res.status);
         return await res.json();
-      } catch (e) { lastErr = e; }
+      } catch (e) { 
+        lastErr = e; 
+      }
     }
     throw lastErr || new Error("fetch failed");
   }
@@ -186,8 +198,6 @@
       return { map, meta };
       
     }).catch(e => {
-      // CORRECCIÓN: Si falla la conexión o Yahoo no tiene el ticker, devolvemos un mapa vacío 
-      // en lugar de lanzar un error. Esto obliga al código principal a usar el fallback (el precio de compra).
       console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Activando salvavidas (fallback).", e);
       return { map: new Map(), meta: {} };
     });
@@ -210,7 +220,7 @@
   DG.fetchFxSeries = async function (cur, fromDate) {
     if (cur === "EUR") return null;
     const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
-    return map; // Aunque falle Yahoo, devolverá el Map vacío, evitando colapsos
+    return map; 
   };
 
   /** Valor en una serie para un día, retrocediendo hasta 10 días si no cotiza. */

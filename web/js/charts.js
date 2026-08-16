@@ -13,7 +13,7 @@
 
   DG.tradeFilters = DG.tradeFilters || { hidden: new Set() };
 
-  DG.renderPerfChart = function (twr, benchSeries, visible, range, events = []) {
+  DG.renderPerfChart = function (twr, benchSeries, visible, range, events = [], customSeries = new Map()) {
     const pts = twr.filter(p => p.day >= range.from && p.day <= range.to);
     if (!pts.length) return;
 
@@ -84,6 +84,18 @@
         return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 } : null;
       }).filter(Boolean);
       datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: .1 });
+    }
+
+    // Dibujar las series personalizadas (acciones añadidas por el usuario)
+    for (const [symbol, c] of customSeries) {
+      if (!c.map) continue;
+      const start = DG.seriesAt(c.map, pts[0].day);
+      if (!start) continue;
+      const data = pts.map(p => {
+        const v = DG.seriesAt(c.map, p.day);
+        return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 } : null;
+      }).filter(Boolean);
+      datasets.push({ label: c.label, data, borderColor: c.color, borderWidth: 2, pointRadius: 0, fill: false, tension: .1 });
     }
 
     const cfg = {

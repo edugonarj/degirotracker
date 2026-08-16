@@ -248,9 +248,13 @@ tfoot td { font-weight: 700; border-top: 2px solid var(--dg-navy); }
   color: var(--dg-text);
   transition: all 0.15s;
 }
-.btn-secondary:hover { 
+.btn-secondary:hover:not(:disabled) { 
   background: var(--dg-bg); 
   border-color: var(--dg-muted); 
+}
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .sort-label { 
   font-size: 12px; 
@@ -265,3 +269,56 @@ tfoot td { font-weight: 700; border-top: 2px solid var(--dg-navy); }
   width: 16px; 
   height: 16px; 
 }
+
+/* =========================================
+   TICKERS PERSONALIZADOS
+   ========================================= */
+.custom-tickers-sec {
+  margin-top: 16px;
+  border-top: 1px solid var(--dg-border);
+  padding-top: 16px;
+}
+.ticker-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ticker-input-row input {
+  border: 1px solid var(--dg-border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  min-width: 260px;
+}
+.ticker-input-row input:focus {
+  border-color: var(--dg-blue);
+}
+.ticker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ticker-tag {
+  display: inline-flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--dg-border);
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: var(--shadow);
+}
+.ticker-tag .dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.ticker-remove {
+  margin-left: 8px;
+  cursor: pointer;
+  color: var(--dg-muted);
+  font-weight: bold;
+  border: none;
+  background: none;
+  padding: 0 4px;
+  font-size: 14px;
+}
+.ticker-remove:hover { color: var(--dg-red); }

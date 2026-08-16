@@ -80,7 +80,7 @@
 
   const ctx = {
     state: null, twr: null, valueSeries: null,
-    benchSeries: new Map(), visibleBench: new Set(),
+    benchSeries: new Map(), visibleBench: new Set(), customSeries: new Map(),
     priceProviders: new Map(), fxSeries: new Map(),
     productRows: [], range: null, warnings: [], events: []
   };
@@ -241,11 +241,74 @@
     ensureTabs();
     renderBenchToggles();
     drawPerf();
+    setupCustomTickers();
     renderTable(currentTab || "open");
     renderWarnings();
 
     if ($("rangeStart")) $("rangeStart").value = ctx.range.from;
     if ($("rangeEnd")) $("rangeEnd").value = ctx.range.to;
+  }
+
+  function setupCustomTickers() {
+    const input = $("customTickerInput");
+    const btn = $("addCustomTickerBtn");
+    if (!input || !btn) return;
+
+    if (!btn.dataset.init) {
+      btn.onclick = () => addCustomTicker(input.value);
+      input.onkeypress = (e) => { if (e.key === "Enter") addCustomTicker(input.value); };
+      btn.dataset.init = "true";
+    }
+    renderCustomTickerList();
+  }
+
+  async function addCustomTicker(symbol) {
+    symbol = symbol.trim().toUpperCase();
+    if (!symbol || ctx.customSeries.has(symbol)) return;
+
+    const btn = $("addCustomTickerBtn");
+    const prevText = btn.textContent;
+    btn.textContent = "Cargando...";
+    btn.disabled = true;
+
+    try {
+      const from = ctx.state.firstDate;
+      const { map } = await DG.fetchYahooSeries(symbol, from);
+      if (map && map.size > 0) {
+        const colors = ["#ff5722", "#9c27b0", "#00bcd4", "#ffeb3b", "#795548", "#e91e63", "#3f51b5", "#607d8b"];
+        const color = colors[ctx.customSeries.size % colors.length];
+        ctx.customSeries.set(symbol, { label: symbol, color: color, map });
+        $("customTickerInput").value = "";
+        renderCustomTickerList();
+        drawPerf();
+      } else {
+        alert("No se encontraron precios para el ticker: " + symbol);
+      }
+    } catch (err) {
+      alert("Error al cargar el ticker: " + symbol);
+    } finally {
+      btn.textContent = prevText;
+      btn.disabled = false;
+    }
+  }
+
+  function renderCustomTickerList() {
+    const list = $("customTickerList");
+    if (!list) return;
+    list.innerHTML = "";
+    for (const [symbol, data] of ctx.customSeries) {
+      const tag = document.createElement("div");
+      tag.className = "ticker-tag";
+      tag.innerHTML = `<span class="dot" style="background:${data.color}"></span>${symbol} <button class="ticker-remove" data-sym="${symbol}">×</button>`;
+      list.appendChild(tag);
+    }
+    list.querySelectorAll(".ticker-remove").forEach(btn => {
+      btn.onclick = (e) => {
+        ctx.customSeries.delete(e.target.dataset.sym);
+        renderCustomTickerList();
+        drawPerf();
+      };
+    });
   }
 
   function ensureTabs() {
@@ -284,7 +347,7 @@
 
   function drawPerf() {
     if (ctx.twr && ctx.benchSeries && ctx.range) {
-       DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range, ctx.events);
+       DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range, ctx.events, ctx.customSeries);
        DG.renderMoneyChart(ctx.moneySeries, ctx.range);
        updateRangeCards();
     }

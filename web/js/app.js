@@ -38,7 +38,27 @@
       th_val: "Valor",
       th_inv: "Invertido",
       th_rec: "Recibido",
-      th_div: "Div."
+      th_div: "Div.",
+      upload_h2: "Analiza tu cuenta de DEGIRO",
+      upload_p1: "Arrastra aquí tu archivo Account.xlsx (Actividad → Estado de cuenta → Exportar)",
+      upload_p2: "Todo se procesa en tu navegador. Nada se sube a ningún servidor.",
+      upload_btn: "Seleccionar archivo",
+      rentabilidad_vs: "Rentabilidad vs índices",
+      mi_cartera: "Mi cartera",
+      desde: "Desde",
+      hasta: "Hasta",
+      ticker_ph: "Añadir ticker de Yahoo (ej. AAPL, SAN.MC)",
+      ticker_btn: "Añadir acción",
+      dinero_vs: "Dinero ingresado vs valor y ganancia",
+      resultado_inv: "Resultado por inversión",
+      avisos: "Avisos",
+      cargando: "Cargando...",
+      hint_zoom: "Consejo: usa la rueda del ratón o arrastra para hacer zoom en el gráfico. Doble clic para restablecer.",
+      hint_dinero: "(usa el mismo filtro de fechas del gráfico de arriba)",
+      footer: "Los datos de mercado provienen de Yahoo Finance",
+      compras: "Compras",
+      ventas: "Ventas",
+      rentabilidad_pct: "Rentabilidad (%)"
     },
     en: {
       btn_lang: "ES",
@@ -67,12 +87,47 @@
       th_val: "Value",
       th_inv: "Invested",
       th_rec: "Received",
-      th_div: "Div."
+      th_div: "Div.",
+      upload_h2: "Analyze your DEGIRO account",
+      upload_p1: "Drag & drop your Account.xlsx file here (Activity → Account Statement → Export)",
+      upload_p2: "Everything is processed in your browser. Nothing is uploaded to any server.",
+      upload_btn: "Select file",
+      rentabilidad_vs: "Performance vs Indices",
+      mi_cartera: "My portfolio",
+      desde: "From",
+      hasta: "To",
+      ticker_ph: "Add Yahoo ticker (e.g. AAPL, SAN.MC)",
+      ticker_btn: "Add stock",
+      dinero_vs: "Deposits vs Value and Gain",
+      resultado_inv: "Result per investment",
+      avisos: "Warnings",
+      cargando: "Loading...",
+      hint_zoom: "Tip: use mouse wheel or drag to zoom the chart. Double click to reset.",
+      hint_dinero: "(uses the same date filter as the chart above)",
+      footer: "Market data provided by Yahoo Finance",
+      compras: "Buys",
+      ventas: "Sells",
+      rentabilidad_pct: "Return (%)"
     }
   };
 
   let lang = "es";
   const t = (k) => i18n[lang][k] || k;
+  DG.t = t; // Exponer para que charts.js pueda usar las traducciones
+
+  function applyTranslations() {
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+      const key = el.getAttribute("data-i18n");
+      if (i18n[lang][key]) el.innerHTML = i18n[lang][key]; 
+    });
+    document.querySelectorAll("[data-i18n-ph]").forEach(el => {
+      const key = el.getAttribute("data-i18n-ph");
+      if (i18n[lang][key]) el.placeholder = i18n[lang][key];
+    });
+  }
+
+  // Aplicar traducciones iniciales para la vista de carga
+  applyTranslations();
 
   const fmtLoc = () => lang === "es" ? "es-ES" : "en-US";
   const fmt = (v, maxF) => new Intl.NumberFormat(fmtLoc(), { style: "currency", currency: "EUR", maximumFractionDigits: maxF }).format(v);
@@ -95,12 +150,14 @@
       btn.onclick = () => {
         lang = lang === "es" ? "en" : "es";
         btn.textContent = t("btn_lang");
+        applyTranslations(); 
         if (ctx.state) render();
       };
       container.appendChild(btn);
     }
     $("langHeaderBtn").textContent = t("btn_lang");
   }
+  setupHeaderLangButton();
 
   const dz = $("dropZone");
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("dragover"); });
@@ -122,7 +179,6 @@
   }
 
   async function handleFile(file) {
-    setupHeaderLangButton();
     try {
       log(`Leyendo ${file.name}…`);
       const buf = await file.arrayBuffer();
@@ -206,7 +262,6 @@
   }
 
   function render() {
-    setupHeaderLangButton();
     const st = ctx.state;
     const series = ctx.valueSeries;
     if (!series || series.length === 0) return;
@@ -239,9 +294,9 @@
     }
 
     ensureTabs();
-    renderBenchToggles();
-    drawPerf();
+    if($("benchToggles").children.length === 0) renderBenchToggles();
     setupCustomTickers();
+    drawPerf();
     renderTable(currentTab || "open");
     renderWarnings();
 
@@ -259,7 +314,7 @@
       input.onkeypress = (e) => { if (e.key === "Enter") addCustomTicker(input.value); };
       btn.dataset.init = "true";
     }
-    renderCustomTickerList();
+    if($("customTickerList").children.length === 0) renderCustomTickerList();
   }
 
   async function addCustomTicker(symbol) {
@@ -268,7 +323,7 @@
 
     const btn = $("addCustomTickerBtn");
     const prevText = btn.textContent;
-    btn.textContent = "Cargando...";
+    btn.textContent = t("cargando");
     btn.disabled = true;
 
     try {
@@ -292,6 +347,45 @@
     }
   }
 
+  // Helper para sacar la rentabilidad exacta de un índice/acción en el rango seleccionado
+  function getRangeReturn(map) {
+    if (!ctx.twr || !ctx.range || !map) return null;
+    const pts = ctx.twr.filter(p => p.day >= ctx.range.from && p.day <= ctx.range.to);
+    if (!pts.length) return null;
+    
+    let start = null, end = null;
+    for (const p of pts) { start = DG.seriesAt(map, p.day); if (start) break; }
+    for (let i = pts.length - 1; i >= 0; i--) { end = DG.seriesAt(map, pts[i].day); if (end) break; }
+    if (start && end) return (end / start) - 1;
+    return null;
+  }
+
+  function renderBenchToggles() {
+    const el = $("benchToggles");
+    if (!el) return;
+    el.innerHTML = "";
+    for (const b of DG.BENCHMARKS) {
+      const s = ctx.benchSeries.get(b.id);
+      const div = document.createElement("div");
+      div.id = `toggle-bench-${b.id}`;
+      const avail = s && s.map;
+      div.className = "toggle" + (avail ? (ctx.visibleBench.has(b.id) ? "" : " off") : " unavailable");
+      
+      const r = avail ? getRangeReturn(s.map) : null;
+      const tStr = r != null ? ` (${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%)` : "";
+      
+      div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}${tStr}`;
+      if (avail) {
+        div.onclick = () => {
+          ctx.visibleBench.has(b.id) ? ctx.visibleBench.delete(b.id) : ctx.visibleBench.add(b.id);
+          div.classList.toggle("off");
+          drawPerf();
+        };
+      }
+      el.appendChild(div);
+    }
+  }
+
   function renderCustomTickerList() {
     const list = $("customTickerList");
     if (!list) return;
@@ -299,11 +393,17 @@
     for (const [symbol, data] of ctx.customSeries) {
       const tag = document.createElement("div");
       tag.className = "ticker-tag";
-      tag.innerHTML = `<span class="dot" style="background:${data.color}"></span>${symbol} <button class="ticker-remove" data-sym="${symbol}">×</button>`;
+      tag.id = `toggle-custom-${symbol}`;
+      
+      const r = getRangeReturn(data.map);
+      const tStr = r != null ? ` (${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%)` : "";
+      
+      tag.innerHTML = `<span class="dot" style="background:${data.color}"></span>${symbol}${tStr} <button class="ticker-remove" data-sym="${symbol}">×</button>`;
       list.appendChild(tag);
     }
     list.querySelectorAll(".ticker-remove").forEach(btn => {
       btn.onclick = (e) => {
+        e.stopPropagation();
         ctx.customSeries.delete(e.target.dataset.sym);
         renderCustomTickerList();
         drawPerf();
@@ -324,24 +424,46 @@
     $("tabAll").onclick = () => renderTable("all");
   }
 
-  function renderBenchToggles() {
-    const el = $("benchToggles");
-    if (!el) return;
-    el.innerHTML = "";
+  function updatePerfTitle() {
+    const titleEl = $("perfPanelTitle");
+    if (!titleEl) return;
+    let pRetStr = "—";
+    if (ctx.twr && ctx.range) {
+       const m = DG.rangeMetrics(ctx.valueSeries, ctx.twr, ctx.state.flows, ctx.range);
+       if (m && m.twrPeriod != null) pRetStr = (m.twrPeriod >= 0 ? '+' : '') + (m.twrPeriod * 100).toFixed(1) + '%';
+    }
+    titleEl.innerHTML = `<span data-i18n="rentabilidad_vs">${t("rentabilidad_vs")}</span> <span style="font-weight:normal; font-size:14px; margin-left:12px; color:var(--dg-blue)">${t("mi_cartera")}: <b>${pRetStr}</b></span>`;
+  }
+
+  function updateToggleReturns() {
+    const getRetStr = (map) => {
+      const r = getRangeReturn(map);
+      return r != null ? ` (${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%)` : "";
+    };
+
     for (const b of DG.BENCHMARKS) {
-      const s = ctx.benchSeries.get(b.id);
-      const div = document.createElement("div");
-      const avail = s && s.map;
-      div.className = "toggle" + (avail ? (ctx.visibleBench.has(b.id) ? "" : " off") : " unavailable");
-      div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}`;
-      if (avail) {
-        div.onclick = () => {
-          ctx.visibleBench.has(b.id) ? ctx.visibleBench.delete(b.id) : ctx.visibleBench.add(b.id);
-          div.classList.toggle("off");
-          drawPerf();
-        };
-      }
-      el.appendChild(div);
+       const div = $(`toggle-bench-${b.id}`);
+       if (div) {
+         const s = ctx.benchSeries.get(b.id);
+         const avail = s && s.map;
+         if (avail) {
+           div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}${getRetStr(s.map)}`;
+         }
+       }
+    }
+
+    for (const [sym, data] of ctx.customSeries) {
+       const tag = $(`toggle-custom-${sym}`);
+       if (tag) {
+         tag.innerHTML = `<span class="dot" style="background:${data.color}"></span>${sym}${getRetStr(data.map)} <button class="ticker-remove" data-sym="${sym}">×</button>`;
+         const btn = tag.querySelector(".ticker-remove");
+         if (btn) btn.onclick = (e) => {
+            e.stopPropagation();
+            ctx.customSeries.delete(sym);
+            renderCustomTickerList();
+            drawPerf();
+         };
+       }
     }
   }
 
@@ -350,6 +472,8 @@
        DG.renderPerfChart(ctx.twr, ctx.benchSeries, ctx.visibleBench, ctx.range, ctx.events, ctx.customSeries);
        DG.renderMoneyChart(ctx.moneySeries, ctx.range);
        updateRangeCards();
+       updatePerfTitle();
+       updateToggleReturns();
     }
   }
 
@@ -385,7 +509,7 @@
         case "6m": fromD.setUTCMonth(fromD.getUTCMonth() - 6); break;
         case "ytd": fromD = new Date(Date.UTC(toD.getUTCFullYear(), 0, 1)); break;
         case "1y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 1); break;
-        case "2y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 2); break; // AÑADIDO
+        case "2y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 2); break;
         case "3y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 3); break;
         case "5y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 5); break;
         default: fromD = new Date(ctx.valueSeries[0].day + "T00:00:00Z");
@@ -443,9 +567,6 @@
          $(id).classList.toggle("active", t_id === tab);
       }
     }
-    if ($("tabOpen")) $("tabOpen").textContent = t("tab_open");
-    if ($("tabClosed")) $("tabClosed").textContent = t("tab_closed");
-    if ($("tabAll")) $("tabAll").textContent = t("tab_all");
 
     if (controls) {
       controls.style.display = "flex";

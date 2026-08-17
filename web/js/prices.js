@@ -168,26 +168,15 @@
       const map = new Map();
       const meta = { currency: (r.meta && r.meta.currency) || "USD" };
       
-      const splits = [];
-      if (r.events && r.events.splits) {
-        for (const s of Object.values(r.events.splits)) {
-          const f = (s.numerator && s.denominator) ? s.numerator / s.denominator : null;
-          if (f && f > 0) splits.push({ day: new Date(s.date * 1000).toISOString().slice(0, 10), f });
-        }
-        splits.sort((a, b) => (a.day < b.day ? -1 : 1));
-      }
-      
-      const factorAfter = day => {
-        let f = 1;
-        for (const s of splits) if (s.day > day) f *= s.f;
-        return f;
-      };
+      // Yahoo ya devuelve la variable 'close' ajustada por splits en su API v8 de charts.
+      // Ya no hace falta procesar los eventos de split manualmente, o descuadraremos 
+      // todo cuando haya habido uno.
       
       r.timestamp.forEach((t, i) => {
         const c = closes[i];
         if (c != null) {
           const day = new Date(t * 1000).toISOString().slice(0, 10);
-          map.set(day, c * (splits.length ? factorAfter(day) : 1));
+          map.set(day, c);
         }
       });
       

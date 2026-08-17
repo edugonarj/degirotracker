@@ -58,7 +58,9 @@
       footer: "Los datos de mercado provienen de Yahoo Finance",
       compras: "Compras",
       ventas: "Ventas",
-      rentabilidad_pct: "Rentabilidad (%)"
+      rentabilidad_pct: "Rentabilidad (%)",
+      rentabilidad_anual: "Rentabilidad por año (Año natural)",
+      activo: "Activo"
     },
     en: {
       btn_lang: "ES",
@@ -107,13 +109,15 @@
       footer: "Market data provided by Yahoo Finance",
       compras: "Buys",
       ventas: "Sells",
-      rentabilidad_pct: "Return (%)"
+      rentabilidad_pct: "Return (%)",
+      rentabilidad_anual: "Yearly return (Calendar year)",
+      activo: "Asset"
     }
   };
 
   let lang = "es";
   const t = (k) => i18n[lang][k] || k;
-  DG.t = t; // Exponer para que charts.js pueda usar las traducciones
+  DG.t = t; 
 
   function applyTranslations() {
     document.querySelectorAll("[data-i18n]").forEach(el => {
@@ -126,7 +130,6 @@
     });
   }
 
-  // Aplicar traducciones iniciales para la vista de carga
   applyTranslations();
 
   const fmtLoc = () => lang === "es" ? "es-ES" : "en-US";
@@ -347,7 +350,6 @@
     }
   }
 
-  // Helper para sacar la rentabilidad exacta de un índice/acción en el rango seleccionado
   function getRangeReturn(map) {
     if (!ctx.twr || !ctx.range || !map) return null;
     const pts = ctx.twr.filter(p => p.day >= ctx.range.from && p.day <= ctx.range.to);
@@ -466,6 +468,98 @@
        }
     }
   }
+  
+  function renderYearlyTable() {
+    const container = $("yearlyTableContainer");
+    if (!container) return;
+    
+    if (!ctx.twr || ctx.twr.length === 0) {
+      container.innerHTML = "";
+      return;
+    }
+    
+    // Extraemos todos los años presentes en el historial
+    const years = [...new Set(ctx.twr.map(p => p.day.substring(0, 4)))].sort();
+    const results = {};
+    
+    const getAssetYearly = (map) => {
+      const ret = {};
+      const daysInMap = Array.from(map.keys()).sort();
+      for (let i = 0; i < years.length; i++) {
+        const y = years[i];
+        const prevY = (parseInt(y) - 1).toString();
+        
+        const daysInY = daysInMap.filter(d => d.startsWith(y));
+        if (daysInY.length === 0) {
+          ret[y] = null;
+          continue;
+        }
+        
+        let startVal = null;
+        const daysInPrevY = daysInMap.filter(d => d.startsWith(prevY));
+        if (daysInPrevY.length > 0) {
+          startVal = map.get(daysInPrevY[daysInPrevY.length - 1]);
+        } else {
+          startVal = map.get(daysInY[0]);
+        }
+        
+        const endVal = map.get(daysInY[daysInY.length - 1]);
+        
+        if (startVal != null && endVal != null && startVal !== 0) {
+          ret[y] = (endVal / startVal) - 1;
+        } else {
+          ret[y] = null;
+        }
+      }
+      return ret;
+    };
+    
+    // Cartera
+    const portMap = new Map();
+    ctx.twr.forEach(p => portMap.set(p.day, p.index));
+    results[t("mi_cartera") || "Mi cartera"] = getAssetYearly(portMap);
+    
+    // Índices activos
+    for (const b of DG.BENCHMARKS) {
+      if (ctx.visibleBench.has(b.id)) {
+         const s = ctx.benchSeries.get(b.id);
+         if (s && s.map) results[b.label] = getAssetYearly(s.map);
+      }
+    }
+    
+    // Tickers activos
+    for (const [sym, data] of ctx.customSeries) {
+       if (data && data.map) results[sym] = getAssetYearly(data.map);
+    }
+    
+    let html = `<table class="yearly-table">
+      <thead>
+        <tr>
+          <th>${t("activo")}</th>
+          ${years.map(y => `<th class="num">${y}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+    `;
+    
+    for (const [name, yearData] of Object.entries(results)) {
+      html += `<tr><td style="font-weight:600; color:var(--dg-navy);">${name}</td>`;
+      for (const y of years) {
+        const r = yearData[y];
+        if (r == null) {
+          html += `<td class="num" style="color:var(--dg-muted);">N/A</td>`;
+        } else {
+          const cls = r >= 0 ? "pos" : "neg";
+          const sign = r >= 0 ? "+" : "";
+          html += `<td class="num ${cls}"><b>${sign}${(r * 100).toFixed(1)}%</b></td>`;
+        }
+      }
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+    
+    container.innerHTML = `<h4 style="margin: 0 0 10px 0; font-size:14px; color:var(--dg-navy); font-weight:600;">${t("rentabilidad_anual")}</h4>` + html;
+  }
 
   function drawPerf() {
     if (ctx.twr && ctx.benchSeries && ctx.range) {
@@ -474,6 +568,7 @@
        updateRangeCards();
        updatePerfTitle();
        updateToggleReturns();
+       renderYearlyTable();
     }
   }
 

@@ -385,6 +385,7 @@
         case "6m": fromD.setUTCMonth(fromD.getUTCMonth() - 6); break;
         case "ytd": fromD = new Date(Date.UTC(toD.getUTCFullYear(), 0, 1)); break;
         case "1y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 1); break;
+        case "2y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 2); break; // AÑADIDO
         case "3y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 3); break;
         case "5y": fromD.setUTCFullYear(fromD.getUTCFullYear() - 5); break;
         default: fromD = new Date(ctx.valueSeries[0].day + "T00:00:00Z");

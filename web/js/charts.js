@@ -16,10 +16,12 @@
   DG.renderPerfChart = function (twr, benchSeries, visible, range, events = [], customSeries = new Map()) {
     const pts = twr.filter(p => p.day >= range.from && p.day <= range.to);
     if (!pts.length) return;
+    
+    // Obtener la función de traducción segura (por si aún no ha cargado)
+    const t = DG.t || (k => k);
 
     const base = pts[0].index;
     
-    // Empezar en 0% (restando 1 y multiplicando por 100)
     const userData = pts.map(p => ({ 
       x: new Date(p.day + "T00:00:00Z").getTime(), 
       y: ((p.index / base) - 1) * 100,
@@ -27,11 +29,11 @@
     }));
 
     const datasets = [{
-      label: "Mi cartera",
+      label: t("mi_cartera") || "Mi cartera",
       data: userData,
       borderColor: "#009fdf",
       backgroundColor: "rgba(0,159,223,.08)",
-      borderWidth: 2.5, pointRadius: 0, fill: true, tension: 0, // tension: 0 para evitar bucles de Bézier
+      borderWidth: 2.5, pointRadius: 0, fill: true, tension: 0,
     }];
 
     const buyData = [];
@@ -47,7 +49,6 @@
         if (tradeTime >= fromTime && tradeTime <= toTime) {
           const ticker = (DG.ISIN_TO_YAHOO && DG.ISIN_TO_YAHOO[ev.isin]) ? DG.ISIN_TO_YAHOO[ev.isin] : ev.isin;
 
-          // Filtramos en base a si la acción está desmarcada en la tabla
           if (DG.tradeFilters.hidden.has(ticker)) continue;
 
           const qty = Math.abs(ev.qty).toLocaleString("es-ES");
@@ -55,7 +56,7 @@
           const total = Math.abs(ev.qty * ev.price).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           const cur = ev.tradeCur ? ` ${ev.tradeCur}` : "";
 
-          const action = ev.side === 1 ? "Compra" : "Venta";
+          const action = ev.side === 1 ? (t("compras") || "Compra") : (t("ventas") || "Venta");
           const desc = `${action} ${ticker}, ${qty} x ${price}${cur} = ${total}${cur}`;
 
           let closestIdx = 0;
@@ -74,10 +75,9 @@
       }
     }
 
-    if (buyData.length > 0) datasets.push({ label: "Compras", data: buyData, type: "scatter", backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
-    if (sellData.length > 0) datasets.push({ label: "Ventas", data: sellData, type: "scatter", backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
+    if (buyData.length > 0) datasets.push({ label: t("compras") || "Compras", data: buyData, type: "scatter", backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
+    if (sellData.length > 0) datasets.push({ label: t("ventas") || "Ventas", data: sellData, type: "scatter", backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
 
-    // Dibujar los benchmarks
     for (const [id, b] of benchSeries) {
       if (!visible.has(id) || !b.map) continue;
       
@@ -95,10 +95,9 @@
         const v = DG.seriesAt(b.map, p.day);
         return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
-      datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: 0 }); // tension: 0
+      datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: 0 }); 
     }
 
-    // Dibujar las series personalizadas (acciones añadidas por el usuario)
     for (const [symbol, c] of customSeries) {
       if (!c.map) continue;
       
@@ -116,7 +115,7 @@
         const v = DG.seriesAt(c.map, p.day);
         return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
-      datasets.push({ label: c.label, data, borderColor: c.color, borderWidth: 2, pointRadius: 0, fill: false, tension: 0 }); // tension: 0
+      datasets.push({ label: c.label, data, borderColor: c.color, borderWidth: 2, pointRadius: 0, fill: false, tension: 0 }); 
     }
 
     const cfg = {
@@ -129,7 +128,7 @@
           x: { type: "time", time: { unit: "month", tooltipFormat: "dd MMM yyyy" }, grid: { display: false } },
           y: { 
             ticks: { callback: v => v.toFixed(0) + '%' }, 
-            title: { display: true, text: "Rentabilidad (%)" } 
+            title: { display: true, text: t("rentabilidad_pct") || "Rentabilidad (%)" } 
           },
         },
         plugins: {
@@ -165,7 +164,7 @@
         datasets: [
           { type: "bar", label: "Aportado", data: rows.map(m => m.netCum), backgroundColor: "rgba(0,41,78,.55)", stack: "money" },
           { type: "bar", label: "Ganancia", data: rows.map(m => m.gain), backgroundColor: rows.map(m => (m.gain ?? 0) >= 0 ? "rgba(46,158,91,.65)" : "rgba(214,69,65,.65)"), stack: "money" },
-          { type: "line", label: "Valor", data: rows.map(m => m.value), borderColor: "#009fdf", borderWidth: 2, pointRadius: 0, tension: 0 } // tension: 0
+          { type: "line", label: "Valor", data: rows.map(m => m.value), borderColor: "#009fdf", borderWidth: 2, pointRadius: 0, tension: 0 } 
         ],
       },
       options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => EUR.format(v) } } } }

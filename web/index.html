@@ -74,7 +74,7 @@
       </div>
       
       <!-- Tabla anual dinámica -->
-      <div id="yearlyTableContainer" class="table-wrap" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--dg-border);"></div>
+      <div id="yearlyTableContainer" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--dg-border); overflow-x: auto;"></div>
       
     </div>
 
@@ -94,7 +94,7 @@
           <button id="tabAll" data-i18n="tab_all">Todas</button>
         </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" id="productTableWrap">
         <table id="productTable">
           <thead>
             <tr>

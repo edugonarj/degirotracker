@@ -468,7 +468,7 @@
        }
     }
   }
-  
+
   function renderYearlyTable() {
     const container = $("yearlyTableContainer");
     if (!container) return;
@@ -478,13 +478,16 @@
       return;
     }
     
-    // Extraemos todos los años presentes en el historial
     const years = [...new Set(ctx.twr.map(p => p.day.substring(0, 4)))].sort();
     const results = {};
     
     const getAssetYearly = (map) => {
       const ret = {};
       const daysInMap = Array.from(map.keys()).sort();
+      if (daysInMap.length === 0) {
+        years.forEach(y => ret[y] = null);
+        return ret;
+      }
       for (let i = 0; i < years.length; i++) {
         const y = years[i];
         const prevY = (parseInt(y) - 1).toString();
@@ -514,12 +517,10 @@
       return ret;
     };
     
-    // Cartera
     const portMap = new Map();
     ctx.twr.forEach(p => portMap.set(p.day, p.index));
     results[t("mi_cartera") || "Mi cartera"] = getAssetYearly(portMap);
     
-    // Índices activos
     for (const b of DG.BENCHMARKS) {
       if (ctx.visibleBench.has(b.id)) {
          const s = ctx.benchSeries.get(b.id);
@@ -527,15 +528,14 @@
       }
     }
     
-    // Tickers activos
     for (const [sym, data] of ctx.customSeries) {
        if (data && data.map) results[sym] = getAssetYearly(data.map);
     }
     
-    let html = `<table class="yearly-table">
+    let html = `<table class="yearly-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
       <thead>
         <tr>
-          <th>${t("activo")}</th>
+          <th>${t("activo") || "Activo"}</th>
           ${years.map(y => `<th class="num">${y}</th>`).join("")}
         </tr>
       </thead>
@@ -558,7 +558,7 @@
     }
     html += `</tbody></table>`;
     
-    container.innerHTML = `<h4 style="margin: 0 0 10px 0; font-size:14px; color:var(--dg-navy); font-weight:600;">${t("rentabilidad_anual")}</h4>` + html;
+    container.innerHTML = `<h4 style="margin: 0 0 10px 0; font-size:14px; color:var(--dg-navy); font-weight:600;">${t("rentabilidad_anual") || "Rentabilidad anual"}</h4>` + html;
   }
 
   function drawPerf() {
@@ -634,7 +634,7 @@
     currentTab = tab;
     ensureTabs();
 
-    const tableWrap = document.querySelector(".table-wrap");
+    const tableWrap = document.getElementById("productTableWrap");
     if (!tableWrap) return;
 
     let controls = $("tableControls");

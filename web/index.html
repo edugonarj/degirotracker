@@ -22,11 +22,11 @@
   <section id="uploadView" class="upload-view">
     <div class="upload-card" id="dropZone">
       <div class="upload-icon">📊</div>
-      <h2>Analiza tu cuenta de DEGIRO</h2>
-      <p>Arrastra aquí tu archivo <b>Account.xlsx</b> (Actividad → Estado de cuenta → Exportar)</p>
-      <p class="muted">Todo se procesa en tu navegador. Nada se sube a ningún servidor.</p>
+      <h2 data-i18n="upload_h2">Analiza tu cuenta de DEGIRO</h2>
+      <p data-i18n="upload_p1">Arrastra aquí tu archivo <b>Account.xlsx</b> (Actividad → Estado de cuenta → Exportar)</p>
+      <p class="muted" data-i18n="upload_p2">Todo se procesa en tu navegador. Nada se sube a ningún servidor.</p>
       <label class="btn-primary">
-        Seleccionar archivo
+        <span data-i18n="upload_btn">Seleccionar archivo</span>
         <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
       </label>
     </div>
@@ -43,7 +43,7 @@
 
     <div class="panel">
       <div class="panel-head">
-        <h3>Rentabilidad vs índices <span class="hint">(rentabilidad ponderada por tiempo)</span></h3>
+        <h3 id="perfPanelTitle"><span data-i18n="rentabilidad_vs">Rentabilidad vs índices</span></h3>
         <div class="controls">
           <div class="presets" id="presetBtns">
             <button data-range="1m">1M</button>
@@ -56,19 +56,19 @@
             <button data-range="max" class="active">MAX</button>
           </div>
           <div class="daterange">
-            <label>Desde <input type="date" id="rangeStart"></label>
-            <label>Hasta <input type="date" id="rangeEnd"></label>
+            <label><span data-i18n="desde">Desde</span> <input type="date" id="rangeStart"></label>
+            <label><span data-i18n="hasta">Hasta</span> <input type="date" id="rangeEnd"></label>
           </div>
         </div>
       </div>
       <div class="bench-toggles" id="benchToggles"></div>
       <div class="chart-wrap"><canvas id="perfChart"></canvas></div>
-      <p class="hint">Consejo: usa la rueda del ratón o arrastra para hacer zoom en el gráfico. Doble clic para restablecer.</p>
+      <p class="hint" data-i18n="hint_zoom">Consejo: usa la rueda del ratón o arrastra para hacer zoom en el gráfico. Doble clic para restablecer.</p>
       
       <div class="custom-tickers-sec">
         <div class="ticker-input-row">
-          <input type="text" id="customTickerInput" placeholder="Añadir ticker de Yahoo (ej. AAPL, SAN.MC)">
-          <button id="addCustomTickerBtn" class="btn-secondary">Añadir acción</button>
+          <input type="text" id="customTickerInput" data-i18n-ph="ticker_ph" placeholder="Añadir ticker de Yahoo (ej. AAPL, SAN.MC)">
+          <button id="addCustomTickerBtn" class="btn-secondary" data-i18n="ticker_btn">Añadir acción</button>
         </div>
         <div id="customTickerList" class="ticker-list"></div>
       </div>
@@ -76,27 +76,25 @@
 
     <div class="panel">
       <div class="panel-head">
-        <h3>Dinero ingresado vs valor y ganancia <span class="hint">(usa el mismo filtro de fechas del gráfico de arriba)</span></h3>
+        <h3><span data-i18n="dinero_vs">Dinero ingresado vs valor y ganancia</span> <span class="hint" data-i18n="hint_dinero">(usa el mismo filtro de fechas del gráfico de arriba)</span></h3>
       </div>
       <div class="chart-wrap"><canvas id="moneyChart"></canvas></div>
     </div>
 
     <div class="panel">
       <div class="panel-head">
-        <h3>Resultado por inversión</h3>
+        <h3 data-i18n="resultado_inv">Resultado por inversión</h3>
         <div class="tabs">
-          <button id="tabOpen" class="active">Abiertas</button>
-          <button id="tabClosed">Cerradas</button>
-          <button id="tabAll">Todas</button>
+          <button id="tabOpen" class="active" data-i18n="tab_open">Abiertas</button>
+          <button id="tabClosed" data-i18n="tab_closed">Cerradas</button>
+          <button id="tabAll" data-i18n="tab_all">Todas</button>
         </div>
       </div>
       <div class="table-wrap">
         <table id="productTable">
           <thead>
             <tr>
-              <th>Producto</th><th class="num">Posición</th><th class="num">Valor actual</th>
-              <th class="num">Invertido</th><th class="num">Recibido</th><th class="num">Dividendos</th>
-              <th class="num">P/G total</th><th class="num">%</th>
+              <!-- Generado dinámicamente por JS -->
             </tr>
           </thead>
           <tbody></tbody>
@@ -105,14 +103,14 @@
     </div>
 
     <div class="panel warn-panel hidden" id="warnPanel">
-      <h3>Avisos</h3>
+      <h3 data-i18n="avisos">Avisos</h3>
       <ul id="warnList"></ul>
     </div>
 
   </section>
 </main>
 
-<footer class="foot">Los datos de mercado provienen de Yahoo Finance</footer>
+<footer class="foot" data-i18n="footer">Los datos de mercado provienen de Yahoo Finance</footer>
 
 <script src="js/parser.js"></script>
 <script src="js/replay.js"></script>

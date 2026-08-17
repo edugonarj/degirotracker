@@ -59,7 +59,7 @@
       compras: "Compras",
       ventas: "Ventas",
       rentabilidad_pct: "Rentabilidad (%)",
-      rentabilidad_anual: "Rentabilidad por año (Año natural)",
+      rentabilidad_anual: "Rentabilidad por año natural",
       activo: "Activo"
     },
     en: {
@@ -110,7 +110,7 @@
       compras: "Buys",
       ventas: "Sells",
       rentabilidad_pct: "Return (%)",
-      rentabilidad_anual: "Yearly return (Calendar year)",
+      rentabilidad_anual: "Yearly Return (Calendar Year)",
       activo: "Asset"
     }
   };
@@ -470,8 +470,19 @@
   }
 
   function renderYearlyTable() {
-    const container = $("yearlyTableContainer");
-    if (!container) return;
+    // 1. Forzar la creación del contenedor si el usuario no tiene la versión HTML más reciente
+    let container = $("yearlyTableContainer");
+    if (!container) {
+       container = document.createElement("div");
+       container.id = "yearlyTableContainer";
+       container.style = "margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--dg-border); overflow-x: auto;";
+       const customSec = document.querySelector(".custom-tickers-sec");
+       if (customSec && customSec.parentNode) {
+           customSec.parentNode.insertBefore(container, customSec.nextSibling);
+       } else {
+           return;
+       }
+    }
     
     if (!ctx.twr || ctx.twr.length === 0) {
       container.innerHTML = "";
@@ -517,48 +528,49 @@
       return ret;
     };
     
+    // Fila 1: "Mi cartera" siempre se añade
     const portMap = new Map();
     ctx.twr.forEach(p => portMap.set(p.day, p.index));
     results[t("mi_cartera") || "Mi cartera"] = getAssetYearly(portMap);
     
+    // Fila 2+: Solo índices y tickers que estén encendidos
     for (const b of DG.BENCHMARKS) {
       if (ctx.visibleBench.has(b.id)) {
          const s = ctx.benchSeries.get(b.id);
          if (s && s.map) results[b.label] = getAssetYearly(s.map);
       }
     }
-    
     for (const [sym, data] of ctx.customSeries) {
        if (data && data.map) results[sym] = getAssetYearly(data.map);
     }
     
-    let html = `<table class="yearly-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+    let html = `<table style="width: 100%; border-collapse: collapse; font-size: 13px;">
       <thead>
         <tr>
-          <th>${t("activo") || "Activo"}</th>
-          ${years.map(y => `<th class="num">${y}</th>`).join("")}
+          <th style="text-align: left; padding: 8px; border-bottom: 1px solid var(--dg-border); color: var(--dg-muted); font-size: 11px; text-transform: uppercase;">${t("activo") || "Activo"}</th>
+          ${years.map(y => `<th style="text-align: right; padding: 8px; border-bottom: 1px solid var(--dg-border); color: var(--dg-muted); font-size: 11px; text-transform: uppercase;">${y}</th>`).join("")}
         </tr>
       </thead>
       <tbody>
     `;
     
     for (const [name, yearData] of Object.entries(results)) {
-      html += `<tr><td style="font-weight:600; color:var(--dg-navy);">${name}</td>`;
+      html += `<tr><td style="font-weight:600; color:var(--dg-navy); padding: 8px; border-bottom: 1px solid var(--dg-border);">${name}</td>`;
       for (const y of years) {
         const r = yearData[y];
         if (r == null) {
-          html += `<td class="num" style="color:var(--dg-muted);">N/A</td>`;
+          html += `<td style="text-align: right; color:var(--dg-muted); padding: 8px; border-bottom: 1px solid var(--dg-border);">N/A</td>`;
         } else {
-          const cls = r >= 0 ? "pos" : "neg";
+          const cls = r >= 0 ? "color: var(--dg-green);" : "color: var(--dg-red);";
           const sign = r >= 0 ? "+" : "";
-          html += `<td class="num ${cls}"><b>${sign}${(r * 100).toFixed(1)}%</b></td>`;
+          html += `<td style="text-align: right; ${cls} padding: 8px; border-bottom: 1px solid var(--dg-border);"><b>${sign}${(r * 100).toFixed(1)}%</b></td>`;
         }
       }
       html += `</tr>`;
     }
     html += `</tbody></table>`;
     
-    container.innerHTML = `<h4 style="margin: 0 0 10px 0; font-size:14px; color:var(--dg-navy); font-weight:600;">${t("rentabilidad_anual") || "Rentabilidad anual"}</h4>` + html;
+    container.innerHTML = `<h4 style="margin: 0 0 10px 0; font-size:14px; color:var(--dg-navy); font-weight:600;">${t("rentabilidad_anual") || "Rentabilidad por año natural"}</h4>` + html;
   }
 
   function drawPerf() {
@@ -568,7 +580,7 @@
        updateRangeCards();
        updatePerfTitle();
        updateToggleReturns();
-       renderYearlyTable();
+       renderYearlyTable(); // Llama a construir la tabla
     }
   }
 

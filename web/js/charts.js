@@ -18,9 +18,11 @@
     if (!pts.length) return;
 
     const base = pts[0].index;
+    
+    // Cambiado para empezar en 0% (restando 1 y multiplicando por 100)
     const userData = pts.map(p => ({ 
       x: new Date(p.day + "T00:00:00Z").getTime(), 
-      y: (p.index / base) * 100,
+      y: ((p.index / base) - 1) * 100,
       trades: [] 
     }));
 
@@ -75,13 +77,24 @@
     if (buyData.length > 0) datasets.push({ label: "Compras", data: buyData, type: "scatter", backgroundColor: "#2e9e5b", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
     if (sellData.length > 0) datasets.push({ label: "Ventas", data: sellData, type: "scatter", backgroundColor: "#d64541", borderColor: "#ffffff", borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7, order: 0 });
 
+    // Dibujar los benchmarks
     for (const [id, b] of benchSeries) {
       if (!visible.has(id) || !b.map) continue;
-      const start = DG.seriesAt(b.map, pts[0].day);
+      
+      let start = DG.seriesAt(b.map, pts[0].day);
+      // Si el índice no existía en el primer día, buscamos el primer día que sí tenga datos
+      if (!start) {
+        for (const p of pts) {
+          start = DG.seriesAt(b.map, p.day);
+          if (start) break;
+        }
+      }
+      
       if (!start) continue;
+      
       const data = pts.map(p => {
         const v = DG.seriesAt(b.map, p.day);
-        return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 } : null;
+        return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
       datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: .1 });
     }
@@ -89,11 +102,21 @@
     // Dibujar las series personalizadas (acciones añadidas por el usuario)
     for (const [symbol, c] of customSeries) {
       if (!c.map) continue;
-      const start = DG.seriesAt(c.map, pts[0].day);
+      
+      let start = DG.seriesAt(c.map, pts[0].day);
+      // Si la acción no existía en el primer día, buscamos su primer precio disponible
+      if (!start) {
+        for (const p of pts) {
+          start = DG.seriesAt(c.map, p.day);
+          if (start) break;
+        }
+      }
+      
       if (!start) continue;
+      
       const data = pts.map(p => {
         const v = DG.seriesAt(c.map, p.day);
-        return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: (v / start) * 100 } : null;
+        return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
       datasets.push({ label: c.label, data, borderColor: c.color, borderWidth: 2, pointRadius: 0, fill: false, tension: .1 });
     }
@@ -106,14 +129,18 @@
         interaction: { mode: "x", intersect: false },
         scales: {
           x: { type: "time", time: { unit: "month", tooltipFormat: "dd MMM yyyy" }, grid: { display: false } },
-          y: { ticks: { callback: v => v.toFixed(0) }, title: { display: true, text: "Base 100" } },
+          y: { 
+            ticks: { callback: v => v.toFixed(0) + '%' }, 
+            title: { display: true, text: "Rentabilidad (%)" } 
+          },
         },
         plugins: {
           legend: { display: false },
           tooltip: {
             filter: (item) => item.dataset.type !== "scatter",
             callbacks: { label: ctx => {
-              const labelStr = ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`;
+              const sign = ctx.parsed.y > 0 ? '+' : '';
+              const labelStr = ` ${ctx.dataset.label}: ${sign}${ctx.parsed.y.toFixed(1)}%`;
               return (ctx.datasetIndex === 0 && ctx.raw?.trades?.length) ? [labelStr, ...ctx.raw.trades.map(t => `   • ${t}`)] : labelStr;
             }}
           },

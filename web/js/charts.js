@@ -19,7 +19,7 @@
 
     const base = pts[0].index;
     
-    // Cambiado para empezar en 0% (restando 1 y multiplicando por 100)
+    // Empezar en 0% (restando 1 y multiplicando por 100)
     const userData = pts.map(p => ({ 
       x: new Date(p.day + "T00:00:00Z").getTime(), 
       y: ((p.index / base) - 1) * 100,
@@ -31,7 +31,7 @@
       data: userData,
       borderColor: "#009fdf",
       backgroundColor: "rgba(0,159,223,.08)",
-      borderWidth: 2.5, pointRadius: 0, fill: true, tension: .1,
+      borderWidth: 2.5, pointRadius: 0, fill: true, tension: 0, // tension: 0 para evitar bucles de Bézier
     }];
 
     const buyData = [];
@@ -82,7 +82,6 @@
       if (!visible.has(id) || !b.map) continue;
       
       let start = DG.seriesAt(b.map, pts[0].day);
-      // Si el índice no existía en el primer día, buscamos el primer día que sí tenga datos
       if (!start) {
         for (const p of pts) {
           start = DG.seriesAt(b.map, p.day);
@@ -96,7 +95,7 @@
         const v = DG.seriesAt(b.map, p.day);
         return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
-      datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: .1 });
+      datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: 0 }); // tension: 0
     }
 
     // Dibujar las series personalizadas (acciones añadidas por el usuario)
@@ -104,7 +103,6 @@
       if (!c.map) continue;
       
       let start = DG.seriesAt(c.map, pts[0].day);
-      // Si la acción no existía en el primer día, buscamos su primer precio disponible
       if (!start) {
         for (const p of pts) {
           start = DG.seriesAt(c.map, p.day);
@@ -118,7 +116,7 @@
         const v = DG.seriesAt(c.map, p.day);
         return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
-      datasets.push({ label: c.label, data, borderColor: c.color, borderWidth: 2, pointRadius: 0, fill: false, tension: .1 });
+      datasets.push({ label: c.label, data, borderColor: c.color, borderWidth: 2, pointRadius: 0, fill: false, tension: 0 }); // tension: 0
     }
 
     const cfg = {
@@ -167,7 +165,7 @@
         datasets: [
           { type: "bar", label: "Aportado", data: rows.map(m => m.netCum), backgroundColor: "rgba(0,41,78,.55)", stack: "money" },
           { type: "bar", label: "Ganancia", data: rows.map(m => m.gain), backgroundColor: rows.map(m => (m.gain ?? 0) >= 0 ? "rgba(46,158,91,.65)" : "rgba(214,69,65,.65)"), stack: "money" },
-          { type: "line", label: "Valor", data: rows.map(m => m.value), borderColor: "#009fdf", borderWidth: 2, pointRadius: 0, tension: .15 }
+          { type: "line", label: "Valor", data: rows.map(m => m.value), borderColor: "#009fdf", borderWidth: 2, pointRadius: 0, tension: 0 } // tension: 0
         ],
       },
       options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => EUR.format(v) } } } }

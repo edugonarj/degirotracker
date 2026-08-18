@@ -217,11 +217,11 @@
 
     const benchJobs = DG.BENCHMARKS.map(async b => {
       try {
-        const { map } = await DG.fetchYahooSeries(b.symbol, from);
-        ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map });
+        const { map, adjMap } = await DG.fetchYahooSeries(b.symbol, from);
+        ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map, adjMap });
         if (b.on) ctx.visibleBench.add(b.id);
       } catch {
-        ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map: null });
+        ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map: null, adjMap: null });
         ctx.warnings.push("Índice no disponible: " + b.label);
       }
     });
@@ -235,8 +235,8 @@
       if (!symbol && stillOpen) symbol = await DG.searchYahooByISIN(isin);
       if (symbol) {
         try {
-          const { map, meta } = await DG.fetchYahooSeries(symbol, from);
-          const pp = { kind: "yahoo", map, meta, fb };
+          const { map, adjMap, meta } = await DG.fetchYahooSeries(symbol, from);
+          const pp = { kind: "yahoo", map, adjMap, meta, fb };
           const verdict = DG.validateAgainstTrades(pp, fbPoints);
           if (verdict === "rejected") {
             if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
@@ -331,11 +331,11 @@
 
     try {
       const from = ctx.state.firstDate;
-      const { map } = await DG.fetchYahooSeries(symbol, from);
+      const { map, adjMap } = await DG.fetchYahooSeries(symbol, from);
       if (map && map.size > 0) {
         const colors = ["#ff5722", "#9c27b0", "#00bcd4", "#ffeb3b", "#795548", "#e91e63", "#3f51b5", "#607d8b"];
         const color = colors[ctx.customSeries.size % colors.length];
-        ctx.customSeries.set(symbol, { label: symbol, color: color, map });
+        ctx.customSeries.set(symbol, { label: symbol, color: color, map, adjMap });
         $("customTickerInput").value = "";
         renderCustomTickerList();
         drawPerf();
@@ -373,7 +373,7 @@
       const avail = s && s.map;
       div.className = "toggle" + (avail ? (ctx.visibleBench.has(b.id) ? "" : " off") : " unavailable");
       
-      const r = avail ? getRangeReturn(s.map) : null;
+      const r = avail ? getRangeReturn(s.adjMap || s.map) : null;
       const tStr = r != null ? ` (${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%)` : "";
       
       div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}${tStr}`;
@@ -397,7 +397,7 @@
       tag.className = "ticker-tag";
       tag.id = `toggle-custom-${symbol}`;
       
-      const r = getRangeReturn(data.map);
+      const r = getRangeReturn(data.adjMap || data.map);
       const tStr = r != null ? ` (${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%)` : "";
       
       tag.innerHTML = `<span class="dot" style="background:${data.color}"></span>${symbol}${tStr} <button class="ticker-remove" data-sym="${symbol}">×</button>`;
@@ -449,7 +449,7 @@
          const s = ctx.benchSeries.get(b.id);
          const avail = s && s.map;
          if (avail) {
-           div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}${getRetStr(s.map)}`;
+           div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}${getRetStr(s.adjMap || s.map)}`;
          }
        }
     }
@@ -457,7 +457,7 @@
     for (const [sym, data] of ctx.customSeries) {
        const tag = $(`toggle-custom-${sym}`);
        if (tag) {
-         tag.innerHTML = `<span class="dot" style="background:${data.color}"></span>${sym}${getRetStr(data.map)} <button class="ticker-remove" data-sym="${sym}">×</button>`;
+         tag.innerHTML = `<span class="dot" style="background:${data.color}"></span>${sym}${getRetStr(data.adjMap || data.map)} <button class="ticker-remove" data-sym="${sym}">×</button>`;
          const btn = tag.querySelector(".ticker-remove");
          if (btn) btn.onclick = (e) => {
             e.stopPropagation();
@@ -470,7 +470,6 @@
   }
 
   function renderYearlyTable() {
-    // 1. Forzar la creación del contenedor si el usuario no tiene la versión HTML más reciente
     let container = $("yearlyTableContainer");
     if (!container) {
        container = document.createElement("div");
@@ -528,20 +527,18 @@
       return ret;
     };
     
-    // Fila 1: "Mi cartera" siempre se añade
     const portMap = new Map();
     ctx.twr.forEach(p => portMap.set(p.day, p.index));
     results[t("mi_cartera") || "Mi cartera"] = getAssetYearly(portMap);
     
-    // Fila 2+: Solo índices y tickers que estén encendidos
     for (const b of DG.BENCHMARKS) {
       if (ctx.visibleBench.has(b.id)) {
          const s = ctx.benchSeries.get(b.id);
-         if (s && s.map) results[b.label] = getAssetYearly(s.map);
+         if (s && s.map) results[b.label] = getAssetYearly(s.adjMap || s.map);
       }
     }
     for (const [sym, data] of ctx.customSeries) {
-       if (data && data.map) results[sym] = getAssetYearly(data.map);
+       if (data && data.map) results[sym] = getAssetYearly(data.adjMap || data.map);
     }
     
     let html = `<table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -580,7 +577,7 @@
        updateRangeCards();
        updatePerfTitle();
        updateToggleReturns();
-       renderYearlyTable(); // Llama a construir la tabla
+       renderYearlyTable();
     }
   }
 

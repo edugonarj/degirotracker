@@ -17,7 +17,6 @@
     const pts = twr.filter(p => p.day >= range.from && p.day <= range.to);
     if (!pts.length) return;
     
-    // Obtener la función de traducción segura (por si aún no ha cargado)
     const t = DG.t || (k => k);
 
     const base = pts[0].index;
@@ -81,10 +80,12 @@
     for (const [id, b] of benchSeries) {
       if (!visible.has(id) || !b.map) continue;
       
-      let start = DG.seriesAt(b.map, pts[0].day);
+      const mapToUse = b.adjMap || b.map;
+      
+      let start = DG.seriesAt(mapToUse, pts[0].day);
       if (!start) {
         for (const p of pts) {
-          start = DG.seriesAt(b.map, p.day);
+          start = DG.seriesAt(mapToUse, p.day);
           if (start) break;
         }
       }
@@ -92,7 +93,7 @@
       if (!start) continue;
       
       const data = pts.map(p => {
-        const v = DG.seriesAt(b.map, p.day);
+        const v = DG.seriesAt(mapToUse, p.day);
         return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
       datasets.push({ label: b.label, data, borderColor: b.color, borderWidth: 1.6, pointRadius: 0, fill: false, tension: 0 }); 
@@ -101,10 +102,12 @@
     for (const [symbol, c] of customSeries) {
       if (!c.map) continue;
       
-      let start = DG.seriesAt(c.map, pts[0].day);
+      const mapToUse = c.adjMap || c.map;
+
+      let start = DG.seriesAt(mapToUse, pts[0].day);
       if (!start) {
         for (const p of pts) {
-          start = DG.seriesAt(c.map, p.day);
+          start = DG.seriesAt(mapToUse, p.day);
           if (start) break;
         }
       }
@@ -112,7 +115,7 @@
       if (!start) continue;
       
       const data = pts.map(p => {
-        const v = DG.seriesAt(c.map, p.day);
+        const v = DG.seriesAt(mapToUse, p.day);
         return v != null ? { x: new Date(p.day + "T00:00:00Z").getTime(), y: ((v / start) - 1) * 100 } : null;
       }).filter(Boolean);
       datasets.push({ label: c.label, data, borderColor: c.color, borderWidth: 2, pointRadius: 0, fill: false, tension: 0 }); 

@@ -93,7 +93,11 @@
       if (prev !== null) {
         const flow = flowByDay.get(pt.day) || 0;
         const base = prev + flow; 
-        if (base > 1e-9) {
+        
+        // SOLUCIÓN AL BUG DE 2020: UMBRAL MÍNIMO
+        // Si el valor base de la cuenta es menor de 10 EUR, asumimos que está vacía.
+        // Esto evita que los céntimos residuales multipliquen la gráfica un 5000%.
+        if (base > 10) {
           idx *= pt.value / base;
         }
       }

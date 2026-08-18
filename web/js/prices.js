@@ -150,7 +150,9 @@
   }
 
   /**
-   * Serie diaria de cierres de Yahoo. Devuelve Map("YYYY-MM-DD" -> close).
+   * Serie diaria de cierres de Yahoo. 
+   * Devuelve "map" (precios SIN ajustar para cuadrar el dinero real) 
+   * y "adjMap" (precios ajustados para pintar gráficos sin cortes)
    */
   DG.fetchYahooSeries = async function (symbol, fromDate) {
     const key = "y:" + symbol;
@@ -166,29 +168,44 @@
       
       const closes = r.indicators.quote[0].close;
       const map = new Map();
+      const adjMap = new Map();
       const meta = { currency: (r.meta && r.meta.currency) || "USD" };
       
-      // Yahoo ya devuelve la variable 'close' ajustada por splits en su API v8 de charts.
-      // Ya no hace falta procesar los eventos de split manualmente, o descuadraremos 
-      // todo cuando haya habido uno.
+      // Procesar splits explícitamente para des-ajustar el precio hacia atrás y cuadrar la cartera
+      const splits = [];
+      if (r.events && r.events.splits) {
+        for (const s of Object.values(r.events.splits)) {
+          const f = (s.numerator && s.denominator) ? s.numerator / s.denominator : null;
+          if (f && f > 0) splits.push({ day: new Date(s.date * 1000).toISOString().slice(0, 10), f });
+        }
+        splits.sort((a, b) => (a.day < b.day ? -1 : 1));
+      }
+      
+      const factorAfter = day => {
+        let f = 1;
+        for (const s of splits) if (s.day > day) f *= s.f;
+        return f;
+      };
       
       r.timestamp.forEach((t, i) => {
         const c = closes[i];
         if (c != null) {
           const day = new Date(t * 1000).toISOString().slice(0, 10);
-          map.set(day, c);
+          adjMap.set(day, c);
+          map.set(day, c * (splits.length ? factorAfter(day) : 1));
         }
       });
       
       if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
         const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
         map.set(day, r.meta.regularMarketPrice);
+        adjMap.set(day, r.meta.regularMarketPrice);
       }
-      return { map, meta };
+      return { map, adjMap, meta };
       
     }).catch(e => {
       console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Activando salvavidas (fallback).", e);
-      return { map: new Map(), meta: {} };
+      return { map: new Map(), adjMap: new Map(), meta: {} };
     });
 
     cache.set(key, promise);

@@ -1,134 +1,304 @@
 /**
- * parser.js — Lee el Account.xlsx de DEGIRO y lo convierte en una lista de
- * eventos tipados en orden cronológico. Todo ocurre en el navegador.
+ * prices.js — Precios históricos desde Yahoo Finance (vía proxy CORS público)
+ * con fallback a los precios de tus propias operaciones y normalización segura.
  */
 "use strict";
 
-const DG = window.DG = window.DG || {};
+(function () {
+  const DG = window.DG;
 
-DG.numES = function (s) {
-  if (typeof s === "number") return s;
-  if (!s) return NaN;
-  return parseFloat(String(s).trim().replace(/\./g, "").replace(",", "."));
-};
+  const PROXIES = [
+    u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
+  ];
 
-DG.parseDate = function (v) {
-  if (v instanceof Date) return new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()));
-  if (typeof v === "number") {
-    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  }
-  const m = String(v).trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (!m) return null;
-  return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
-};
+  DG.BENCHMARKS = [
+    { id: "sp500",  label: "S&P 500",            symbol: "^GSPC",       color: "#e8a33d", on: true },
+    { id: "dow",    label: "Dow Jones",          symbol: "^DJI",        color: "#8e6bbf", on: false },
+    { id: "russell",label: "Russell 2000",       symbol: "^RUT",        color: "#d64541", on: false },
+    { id: "msci",   label: "MSCI World (URTH)",  symbol: "URTH",        color: "#2e9e5b", on: true },
+    { id: "numantia", label: "Numantia Patrimonio", symbol: "0P000168OI.F", color: "#666f7a", on: false },
+  ];
 
-DG.dayKey = d => d.toISOString().slice(0, 10);
+  DG.ISIN_TO_YAHOO = {
+    "US00217D1000": "ASTS",      
+    "US5901061003": "MRLN",      
+    "CA0074082060": "ACT.TO",    
+    "IE00BK5BZX59": "GOO3.L",    
+    "IE00BK5C1B80": "FB3.L",     
+    "IE00BK5BZV36": "MSF3.L",    
+    "GB00BJYDH287": "BTCW.SW",   
+    "XS2595672036": "TLT5.L",    
+    "CA11271J1075": "BN",        
+    "FR0000121014": "MC.PA",     
+    "CA3803551074": "GSY.TO",    
+    "US4330001060": "HIMS",      
+    "IE00B4ND3602": "IGLN.L",    
+    "DE000A3H2200": "NA9.DE",    
+    "PLDINPL00011": "DNP.WA",    
+    "US30292L1070": "FRPH",      
+    "FR0000051807": "TEP.PA",    
+    "CA2674881040": "DND.TO",    
+    "CA5266821092": "LNF.TO",    
+    "CA09173B1076": "BITF",      
+    "CA3615692058": "GDI.TO",    
+    "US22160K1051": "COST",      
+    "NL0006294274": "ENX.PA",    
+    "AU0000185993": "IREN",      
+    "NL0015000IY2": "UMG.AS",    
+    "CA55378N1078": "MTY.TO",    
+    "AU0000056269": "MAD.AX",    
+    "DE000FTG1111": "FTK.DE",    
+    "AU0000048001": "AFL.AX",    
+    "IT0005439085": "TISG.MI",   
+    "CA21250C1068": "CTS.TO",    
+    "IT0005385213": "NWL.MI",    
+    "CA59162N1096": "MRU.TO",    
+    "CA0679011084": "GOLD",      
+    "US00287Y1091": "ABBV",      
+    "IE00BF4RFH31": "IUSN.DE",   
+    "IT0003549422": "SL.MI",     
+    "ES0183746314": "VID.MC",    
+    "US30212P3038": "EXPE",      
+    "US0463531089": "AZN",       
+    "US43300A2033": "HLT",       
+    "US4592001014": "IBM",
+    "US9497461015": "WFC",       
+    "US00206R1023": "T",         
+    "US2561631068": "DOCU",      
+    "US0079031078": "AMD",
+    "PLATPRT00018": "APR.WA",    
+    "US79466L3024": "CRM",       
+    "NL0010273215": "ASML.AS",   
+    "NL0009805522": "NBIS",      
+    "US78409V1044": "SPGI",      
+    "US01609W1027": "BABA",      
+    "LU1681048630": "GLUX.PA",   
+    "US68236H2040": "ONDS",      
+    "US6877931096": "OSCR",      
+    "GB0002875804": "BATS.L",    
+    "IE00BK5BZS07": "AAP3.L",    
+    "IE00B8K7KM88": "3USS.MI",   
+    "CA55027C1068": "LMN.V",     
+    "US92826C8394": "V",         
+    "IE00B7Y34M31": "3USL.MI",   
+    "GB0006215205": "MCG.L",     
+    "AU000000KPG7": "KPG.AX",    
+    "US17253J1060": "CIFR",      
+    "IE00BK5BZQ82": "AMZ3.L",    
+    "US5835433013": "SLNH",      
+    "US57636Q1040": "MA",        
+    "CA50077N1024": "PNG.V",     
+    "US0258161092": "AXP",       
+    "FR0000072597": "ALITL.PA",  
+    "US2473617023": "DAL",       
+    "DE0007236101": "SIE.DE",    
+    "AU0000109159": "DUR.AX",    
+    "US3927091013": "GRBK",      
+    "IE00BMC38736": "SMH.L",     
+    "GB00B3FBWW43": "SDI.L",     
+    "US0970231058": "BA",        
+    "CH1134540470": "ONON",      
+    "US85208M1027": "SFM",       
+    "US1912161007": "KO",        
+    "US70450Y1038": "PYPL",      
+    "IE00B3XXRP09": "VUSA.L",    
+    "IE0001827041": "CRH",       
+    "US7170811035": "PFE",       
+    "CA82509L1076": "SHOP",      
+    "FI4000391487": "RELAIS.HE", 
+    "IE00B60SX394": "SC0J.DE",   
+    "US8522341036": "XYZ",       
+    "ES0105025003": "MRL.MC",    
+    "US0378331005": "AAPL",
+    "US88160R1014": "TSLA",
+    "US02079K3059": "GOOGL",
+    "US0231351067": "AMZN",
+    "US30303M1027": "META",
+    "US64110L1061": "NFLX",
+    "US5949181045": "MSFT",
+    "US67066G1040": "NVDA",
+  };
 
-const TRADE_RE = new RegExp(
-  "^(?:(FUSI\u00d3N|CAMBIO DE PRODUCTO|CAMBIO DE ISIN|EMISI\u00d3N DE DERECHOS|DESLISTAMIENTO)\\s*:?\\s*)?" +
-  "(Compra|Venta)\\s+([\\d.,]+)\\s+([\\s\\S]*?)@([\\d.,]+)\\s+([A-Z]{3})\\s*\\((\\w{12})\\)?"
-);
-const SPLIT_RE = /^AJUSTE POR SPLIT:\s*([\d.,]+)\s+([\s\S]*?)\s*@\s*([\d.,]+)\s+([A-Z]{3})\s*\((\w{12})\)/;
+  const cache = new Map(); 
 
-const DEPOSIT_DESCS = new Set(["flatex Deposit", "Flatex Instant Deposit", "Ingreso Sofort/Trustly", "Ingreso"]);
-const WITHDRAW_DESCS = new Set(["flatex Withdrawal", "Retirada"]);
-
-DG.parseAccountFile = function (buf) {
-  const wb = XLSX.read(buf, { type: "array", cellDates: false });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-
-  let start = 0;
-  for (let i = 0; i < Math.min(raw.length, 5); i++) {
-    if (String(raw[i][0]).trim() === "Fecha") { start = i + 1; break; }
-  }
-  const rows = raw.slice(start).filter(r => r && r.some(c => c !== null && c !== ""));
-
-  const merged = [];
-  for (const r of rows) {
-    const hasDate = r[0] !== null && r[0] !== "" && DG.parseDate(r[0]) !== null;
-    if (!hasDate && merged.length) {
-      const prev = merged[merged.length - 1];
-      const a = String(prev[5] || "").replace(/\s+$/, "");
-      const b = String(r[5] || "").trim();
-      const glue = (/[\d][.,]$/.test(a) && /^\d/.test(b)) ? "" : " ";
-      prev[5] = a + glue + b;
-      for (const c of [7, 8, 9, 10, 11]) if (prev[c] === null && r[c] !== null) prev[c] = r[c];
-    } else if (hasDate) {
-      merged.push(r.slice());
+  async function fetchJSON(url) {
+    let lastErr;
+    for (const p of PROXIES) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000); 
+        
+        const res = await fetch(p(url), { 
+            headers: { Accept: "application/json" },
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return await res.json();
+      } catch (e) { 
+        lastErr = e; 
+      }
     }
+    throw lastErr || new Error("fetch failed");
   }
-  merged.reverse();
 
-  const events = [];
-  const warnings = [];
+  DG.fetchYahooSeries = async function (symbol, fromDate) {
+    const key = "y:" + symbol;
+    if (cache.has(key)) return cache.get(key);
+    
+    const p1 = Math.floor(fromDate.getTime() / 1000) - 86400 * 7;
+    const p2 = Math.floor(Date.now() / 1000) + 86400;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&events=div%2Csplit`;
+    
+    const promise = fetchJSON(url).then(j => {
+      const r = j.chart && j.chart.result && j.chart.result[0];
+      if (!r || !r.timestamp) throw new Error("sin datos para " + symbol);
+      
+      const closes = r.indicators.quote[0].close;
+      const map = new Map();
+      const adjMap = new Map();
+      const meta = { currency: (r.meta && r.meta.currency) || "USD" };
+      
+      const splits = [];
+      if (r.events && r.events.splits) {
+        for (const s of Object.values(r.events.splits)) {
+          const f = (s.numerator && s.denominator) ? s.numerator / s.denominator : null;
+          if (f && f > 0) splits.push({ day: new Date(s.date * 1000).toISOString().slice(0, 10), f });
+        }
+        splits.sort((a, b) => (a.day < b.day ? -1 : 1));
+      }
+      
+      const factorAfter = day => {
+        let f = 1;
+        for (const s of splits) if (s.day > day) f *= s.f;
+        return f;
+      };
+      
+      r.timestamp.forEach((t, i) => {
+        const c = closes[i];
+        if (c != null) {
+          const day = new Date(t * 1000).toISOString().slice(0, 10);
+          adjMap.set(day, c);
+          map.set(day, c * (splits.length ? factorAfter(day) : 1));
+        }
+      });
+      
+      if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
+        const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
+        map.set(day, r.meta.regularMarketPrice);
+        adjMap.set(day, r.meta.regularMarketPrice);
+      }
+      return { map, adjMap, meta };
+      
+    }).catch(e => {
+      console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Activando salvavidas (fallback).", e);
+      return { map: new Map(), adjMap: new Map(), meta: {} };
+    });
 
-  for (const r of merged) {
-    const date = DG.parseDate(r[0]);
-    const desc = String(r[5] || "").trim();
-    const ev = {
-      date, time: r[1] || "", product: r[3] || null, isin: r[4] || null,
-      desc, fxRate: (typeof r[6] === "number") ? r[6] : null,
-      cur: r[7] || null, amount: (typeof r[8] === "number") ? r[8] : null,
-      orderId: r[11] || null, type: "other",
+    cache.set(key, promise);
+    return promise;
+  };
+
+  DG.searchYahooByISIN = async function (isin) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${isin}&quotesCount=3&newsCount=0`;
+      const j = await fetchJSON(url);
+      const q = j.quotes && j.quotes[0];
+      return q ? q.symbol : null;
+    } catch { return null; }
+  };
+
+  DG.fetchFxSeries = async function (cur, fromDate) {
+    if (cur === "EUR") return null;
+    const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
+    return map; 
+  };
+
+  DG.seriesAt = function (map, dayKey) {
+    if (!map) return null;
+    if (map.has(dayKey)) return map.get(dayKey);
+    const d = new Date(dayKey + "T00:00:00Z");
+    for (let i = 1; i <= 10; i++) {
+      d.setUTCDate(d.getUTCDate() - 1);
+      const k = d.toISOString().slice(0, 10);
+      if (map.has(k)) return map.get(k);
+    }
+    return null;
+  };
+
+  DG.validateAgainstTrades = function (pp, tradePoints, fxSeries) {
+    if (!pp || pp.kind !== "yahoo" || !tradePoints || !tradePoints.length) return "ok";
+    
+    let yCur = pp.meta.currency || "USD";
+    const yIsPence = (yCur === "GBp" || yCur === "GBX");
+    const normalizedYCur = yIsPence ? "GBP" : yCur;
+
+    const ratios = [];
+    
+    for (const t of tradePoints) {
+      let y = DG.seriesAt(pp.map, DG.dayKey(t.date));
+      if (y == null || !t.price) continue;
+      
+      let yNorm = yIsPence ? y / 100 : y;
+      
+      let tCur = t.cur || "EUR";
+      let tIsPence = (tCur === "GBX" || tCur === "GBp");
+      let normalizedTCur = tIsPence ? "GBP" : tCur;
+      let tNorm = tIsPence ? t.price / 100 : t.price;
+      
+      if (normalizedYCur !== normalizedTCur) {
+        let yInEur = yNorm;
+        if (normalizedYCur !== "EUR") {
+           if (fxSeries && fxSeries.has(normalizedYCur)) {
+               const fxY = DG.seriesAt(fxSeries.get(normalizedYCur), DG.dayKey(t.date));
+               if (fxY) yInEur = yNorm / fxY;
+               else continue; 
+           } else continue; 
+        }
+        
+        let tInEur = tNorm;
+        if (normalizedTCur !== "EUR") {
+           if (fxSeries && fxSeries.has(normalizedTCur)) {
+               const fxT = DG.seriesAt(fxSeries.get(normalizedTCur), DG.dayKey(t.date));
+               if (fxT) tInEur = tNorm / fxT;
+               else continue; 
+           } else continue; 
+        }
+        
+        if (tInEur > 0) ratios.push(yInEur / tInEur);
+      } else {
+        if (tNorm > 0) ratios.push(yNorm / tNorm);
+      }
+    }
+    
+    if (ratios.length < 1) return "ok";
+    ratios.sort((a, b) => a - b);
+    const med = ratios[Math.floor(ratios.length / 2)];
+    if (med > 0.67 && med < 1.5) return "ok"; 
+    
+    const spread = ratios[ratios.length - 1] / ratios[0];
+    if (spread < 1.6) {
+      for (const [k, v] of pp.map) pp.map.set(k, v / med);
+      return "rescaled";
+    }
+    return "rejected";
+  };
+
+  DG.tradeFallbackSeries = function (points) {
+    const sorted = [...points].sort((a, b) => a.date - b.date);
+    return {
+      cur: sorted.length ? sorted[sorted.length - 1].cur : "EUR",
+      at(dayKey) {
+        let last = null;
+        for (const p of sorted) {
+          if (DG.dayKey(p.date) <= dayKey) last = p.price; else break;
+        }
+        return last;
+      },
     };
-
-    let m;
-    if ((m = TRADE_RE.exec(desc))) {
-      ev.type = "trade";
-      ev.special = m[1] || null;
-      ev.side = m[2] === "Compra" ? 1 : -1;
-      ev.qty = DG.numES(m[3]) * ev.side;
-      ev.price = DG.numES(m[5]);
-      ev.tradeCur = m[6];
-      
-      if (ev.tradeCur === "GBX" || ev.tradeCur === "GBp") {
-        ev.tradeCur = "GBP";
-        ev.price = ev.price / 100;
-      }
-      
-      ev.isin = m[7];
-      if (!ev.product) ev.product = m[4].trim();
-    } else if ((m = SPLIT_RE.exec(desc))) {
-      ev.type = "split";
-      const q = DG.numES(m[1]);
-      ev.qty = (ev.amount !== null && ev.amount < 0) ? q : -q;
-      ev.price = DG.numES(m[3]);
-      ev.tradeCur = m[4];
-      
-      if (ev.tradeCur === "GBX" || ev.tradeCur === "GBp") {
-        ev.tradeCur = "GBP";
-        ev.price = ev.price / 100;
-      }
-      
-      ev.isin = m[5];
-    } else if (DEPOSIT_DESCS.has(desc)) {
-      ev.type = "deposit";
-    } else if (WITHDRAW_DESCS.has(desc)) {
-      ev.type = "withdrawal";
-    } else if (desc === "Reservation iDEAL") {
-      ev.type = "reservation";
-    } else if (desc === "Processed Flatex Withdrawal") {
-      ev.type = "wprocessed";
-    } else if (desc === "Ingreso Cambio de Divisa" || desc === "Retirada Cambio de Divisa") {
-      ev.type = "fx";
-    } else if (desc === "Degiro Cash Sweep Transfer" || /fondos del mercado monetario/i.test(desc)) {
-      ev.type = "sweep";
-    } else if (/^Dividendo$/i.test(desc)) {
-      ev.type = "dividend";
-    } else if (/Retenci\u00f3n del dividendo/i.test(desc)) {
-      ev.type = "divtax";
-    } else if (/Pr\u00e9stamo de Valores/i.test(desc)) {
-      ev.type = "lending";
-    } else if (/comisi\u00f3n|costes de|coste de|conectividad|inter\u00e9s/i.test(desc)) {
-      ev.type = "fee";
-    } else if (/^(Compra|Venta)/.test(desc) || /POR SPLIT/.test(desc)) {
-      warnings.push("Fila tipo operación sin interpretar: " + desc.slice(0, 120));
-    }
-
-    events.push(ev);
-  }
-
-  return { events, warnings };
-};
+  };
+})();

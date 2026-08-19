@@ -1,17 +1,17 @@
 /**
  * prices.js — Precios históricos desde Yahoo Finance (vía proxies CORS)
- * con control de concurrencia (Throttling) y fallback a los precios de operaciones.
+ * con fallback a los precios de tus propias operaciones y normalización segura.
+ * Incluye diccionario actualizado y buscador dinámico inteligente.
  */
 "use strict";
 
 (function () {
   const DG = window.DG;
 
+  // Proxies ultra-rápidos y estables
   const PROXIES = [
     u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    u => "https://corsproxy.io/?" + encodeURIComponent(u),
-    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
-    u => "https://thingproxy.freeboard.io/fetch/" + encodeURIComponent(u)
+    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
   ];
 
   DG.BENCHMARKS = [
@@ -120,6 +120,8 @@
     "US64110L1061": "NFLX",
     "US5949181045": "MSFT",
     "US67066G1040": "NVDA",
+
+    // Los 18 activos añadidos a mano para evitar rate limiting:
     "KYG651631007": "JOBY",      
     "KYG254571055": "CRDO",      
     "US46222L1089": "IONQ",      
@@ -137,7 +139,7 @@
     "US8740391003": "TSM",       
     "US78392B2060": "HXSCF",     
     "US78392B1070": "HXSCF",     
-    "US84615Q1031": "SPCX"
+    "US84615Q1031": "SPCX" 
   };
 
   const cache = new Map(); 
@@ -151,7 +153,7 @@
     for (const p of PROXIES) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 7000); 
+        const timeoutId = setTimeout(() => controller.abort(), 4500); // Falla rápido para no congelar la app
         
         const res = await fetch(p(url), { 
             headers: { Accept: "application/json" },
@@ -220,7 +222,7 @@
         }
         return { map, adjMap, meta };
       } catch (e) {
-        console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Usando fallback.", e);
+        console.warn("Fallo al obtener precios de Yahoo para: " + symbol, e);
         return { map: new Map(), adjMap: new Map(), meta: {} };
       }
     })();

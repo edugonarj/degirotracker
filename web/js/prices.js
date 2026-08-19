@@ -1,6 +1,6 @@
 /**
  * prices.js — Precios históricos desde Yahoo Finance (vía proxy CORS público)
- * con fallback a los precios de tus propias operaciones y normalización de divisas.
+ * con fallback a los precios de tus propias operaciones y normalización segura.
  */
 "use strict";
 
@@ -82,7 +82,7 @@
     "IE00B8K7KM88": "3USS.MI",   
     "CA55027C1068": "LMN.V",     
     "US92826C8394": "V",         
-    "IE00B7Y34M31": "3USL.L",    
+    "IE00B7Y34M31": "3USL.MI",   
     "GB0006215205": "MCG.L",     
     "AU000000KPG7": "KPG.AX",    
     "US17253J1060": "CIFR",      
@@ -232,31 +232,46 @@
 
   DG.validateAgainstTrades = function (pp, tradePoints, fxSeries) {
     if (!pp || pp.kind !== "yahoo" || !tradePoints || !tradePoints.length) return "ok";
+    
     let yCur = pp.meta.currency || "USD";
-    const gbp = yCur === "GBp";
+    const yIsPence = (yCur === "GBp" || yCur === "GBX");
+    const normalizedYCur = yIsPence ? "GBP" : yCur;
+
     const ratios = [];
     
     for (const t of tradePoints) {
       let y = DG.seriesAt(pp.map, DG.dayKey(t.date));
       if (y == null || !t.price) continue;
-      if (gbp) y = y / 100;
       
-      const normalizedYCur = gbp ? "GBP" : yCur;
+      let yNorm = yIsPence ? y / 100 : y;
       
-      if (normalizedYCur !== t.cur) {
-        let yInEur = y;
-        if (normalizedYCur !== "EUR" && fxSeries && fxSeries.has(normalizedYCur)) {
-           const fxY = DG.seriesAt(fxSeries.get(normalizedYCur), DG.dayKey(t.date));
-           if (fxY) yInEur = y / fxY;
+      let tCur = t.cur || "EUR";
+      let tIsPence = (tCur === "GBX" || tCur === "GBp");
+      let normalizedTCur = tIsPence ? "GBP" : tCur;
+      let tNorm = tIsPence ? t.price / 100 : t.price;
+      
+      if (normalizedYCur !== normalizedTCur) {
+        let yInEur = yNorm;
+        if (normalizedYCur !== "EUR") {
+           if (fxSeries && fxSeries.has(normalizedYCur)) {
+               const fxY = DG.seriesAt(fxSeries.get(normalizedYCur), DG.dayKey(t.date));
+               if (fxY) yInEur = yNorm / fxY;
+               else continue; 
+           } else continue; 
         }
-        let tInEur = t.price;
-        if (t.cur !== "EUR" && fxSeries && fxSeries.has(t.cur)) {
-           const fxT = DG.seriesAt(fxSeries.get(t.cur), DG.dayKey(t.date));
-           if (fxT) tInEur = t.price / fxT;
+        
+        let tInEur = tNorm;
+        if (normalizedTCur !== "EUR") {
+           if (fxSeries && fxSeries.has(normalizedTCur)) {
+               const fxT = DG.seriesAt(fxSeries.get(normalizedTCur), DG.dayKey(t.date));
+               if (fxT) tInEur = tNorm / fxT;
+               else continue; 
+           } else continue; 
         }
+        
         if (tInEur > 0) ratios.push(yInEur / tInEur);
       } else {
-        ratios.push(y / t.price);
+        if (tNorm > 0) ratios.push(yNorm / tNorm);
       }
     }
     

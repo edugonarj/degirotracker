@@ -64,6 +64,7 @@
         if (pp.kind === "yahoo") {
           px = DG.seriesAt(pp.map, day);
           cur = pp.meta.currency || "EUR";
+          // Normalización para que coincidan peniques y libras de Yahoo
           if (cur === "GBp" || cur === "GBX") { px = px != null ? px / 100 : null; cur = "GBP"; }
         }
         if (px == null && pp.fb) { px = pp.fb.at(day); cur = pp.fb.cur; }
@@ -94,6 +95,7 @@
         const flow = flowByDay.get(pt.day) || 0;
         const base = prev + flow; 
         
+        // El arreglo de Octubre 2020: neutraliza rentabilidades irreales al retirar fondos.
         if (base >= 10 && pt.value >= 10) {
           idx *= pt.value / base;
         }

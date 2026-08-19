@@ -59,7 +59,7 @@ DG.parseAccountFile = function (buf) {
       merged.push(r.slice());
     }
   }
-  merged.reverse();
+  merged.reverse(); 
 
   const events = [];
   const warnings = [];
@@ -83,11 +83,12 @@ DG.parseAccountFile = function (buf) {
       ev.price = DG.numES(m[5]);
       ev.tradeCur = m[6];
       
+      // El arreglo para evitar saltos del 14.000%
       if (ev.tradeCur === "GBX" || ev.tradeCur === "GBp") {
         ev.tradeCur = "GBP";
         ev.price = ev.price / 100;
       }
-      
+
       ev.isin = m[7];
       if (!ev.product) ev.product = m[4].trim();
     } else if ((m = SPLIT_RE.exec(desc))) {
@@ -97,11 +98,12 @@ DG.parseAccountFile = function (buf) {
       ev.price = DG.numES(m[3]);
       ev.tradeCur = m[4];
       
+      // El arreglo para evitar saltos del 14.000%
       if (ev.tradeCur === "GBX" || ev.tradeCur === "GBp") {
         ev.tradeCur = "GBP";
         ev.price = ev.price / 100;
       }
-      
+
       ev.isin = m[5];
     } else if (DEPOSIT_DESCS.has(desc)) {
       ev.type = "deposit";
@@ -113,6 +115,7 @@ DG.parseAccountFile = function (buf) {
       ev.type = "wprocessed";
     } else if (desc === "Ingreso Cambio de Divisa" || desc === "Retirada Cambio de Divisa") {
       ev.type = "fx";
+    // El arreglo de los fondos monetarios (para limpiar el saldo falso de la cuenta)
     } else if (desc === "Degiro Cash Sweep Transfer" || /fondos del mercado monetario/i.test(desc)) {
       ev.type = "sweep";
     } else if (/^Dividendo$/i.test(desc)) {

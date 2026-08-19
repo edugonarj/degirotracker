@@ -64,7 +64,8 @@
         if (pp.kind === "yahoo") {
           px = DG.seriesAt(pp.map, day);
           cur = pp.meta.currency || "EUR";
-          if (cur === "GBp") { px = px != null ? px / 100 : null; cur = "GBP"; }
+          // Normalización de peniques británicos a libras
+          if (cur === "GBp" || cur === "GBX") { px = px != null ? px / 100 : null; cur = "GBP"; }
         }
         if (px == null && pp.fb) { px = pp.fb.at(day); cur = pp.fb.cur; }
         if (px == null) { missingPrices.add(isin); continue; }
@@ -94,10 +95,11 @@
         const flow = flowByDay.get(pt.day) || 0;
         const base = prev + flow; 
         
-        // SOLUCIÓN AL BUG DE 2020: UMBRAL MÍNIMO
-        // Si el valor base de la cuenta es menor de 10 EUR, asumimos que está vacía.
-        // Esto evita que los céntimos residuales multipliquen la gráfica un 5000%.
-        if (base > 10) {
+        // FILTRO DE SEGURIDAD PARA SALDOS RESIDUALES:
+        // Si el valor base de la cuenta o el valor final caen por debajo de 10 EUR,
+        // la rentabilidad de ese día no aplica (se multiplica por 1 implícitamente).
+        // Evita saltos porcentuales extremos cuando la cuenta está virtualmente vacía.
+        if (base >= 10 && pt.value >= 10) {
           idx *= pt.value / base;
         }
       }
@@ -134,7 +136,8 @@
           if (pp.kind === "yahoo") {
             px = DG.seriesAt(pp.map, lastDay);
             cur = pp.meta.currency || "EUR";
-            if (cur === "GBp") { px = px != null ? px / 100 : null; cur = "GBP"; }
+            // Normalización de peniques británicos a libras
+            if (cur === "GBp" || cur === "GBX") { px = px != null ? px / 100 : null; cur = "GBP"; }
           }
           if (px == null && pp.fb) { px = pp.fb.at(lastDay); cur = pp.fb.cur; }
         }

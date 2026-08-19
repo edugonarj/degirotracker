@@ -215,6 +215,8 @@
       catch { ctx.warnings.push("Sin serie FX para " + c); }
     });
 
+    await Promise.allSettled(fxJobs);
+
     const benchJobs = DG.BENCHMARKS.map(async b => {
       try {
         const { map, adjMap } = await DG.fetchYahooSeries(b.symbol, from);
@@ -237,7 +239,7 @@
         try {
           const { map, adjMap, meta } = await DG.fetchYahooSeries(symbol, from);
           const pp = { kind: "yahoo", map, adjMap, meta, fb };
-          const verdict = DG.validateAgainstTrades(pp, fbPoints);
+          const verdict = DG.validateAgainstTrades(pp, fbPoints, ctx.fxSeries);
           if (verdict === "rejected") {
             if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
             return;
@@ -249,7 +251,7 @@
       if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
     });
 
-    await Promise.allSettled([...fxJobs, ...benchJobs, ...prodJobs]);
+    await Promise.allSettled([...benchJobs, ...prodJobs]);
   }
 
   function compute() {

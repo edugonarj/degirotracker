@@ -1,6 +1,6 @@
 /**
- * app.js — Orquestación del dashboard, cambio de idioma,
- * carga optimizada de precios con progreso en vivo.
+ * app.js — Orquestación del dashboard y
+ * carga optimizada de peticiones con Throttling para no bloquear proxies.
  */
 "use strict";
 
@@ -205,33 +205,41 @@
     }
   }
 
+  // Cola de ejecución para evitar rate limiting (HTTP 429) de los proxies CORS
+  async function runPool(tasks, maxConcurrency) {
+    for (let i = 0; i < tasks.length; i += maxConcurrency) {
+      const chunk = tasks.slice(i, i + maxConcurrency);
+      await Promise.allSettled(chunk.map(fn => fn()));
+    }
+  }
+
   async function loadAllPrices() {
     const st = ctx.state;
     const from = st.firstDate;
-
-    let totalTasks = 0;
-    let completedTasks = 0;
-
-    const updateProgress = () => {
-      completedTasks++;
-      log(`Descargando cotizaciones... (${completedTasks}/${totalTasks})`);
-    };
 
     const fxCurrencies = [...st.currencies].filter(c => c !== "EUR");
     const benchList = DG.BENCHMARKS;
     const isins = [...st.products.keys()];
 
-    totalTasks = fxCurrencies.length + benchList.length + isins.length;
-    log(`Descargando cotizaciones... (0/${totalTasks})`);
+    let totalTasks = fxCurrencies.length + benchList.length + isins.length;
+    let completedTasks = 0;
 
-    // Disparamos todo en paralelo de forma natural (falla rápido si hay error)
-    const fxJobs = fxCurrencies.map(async c => {
+    const updateProgress = () => {
+      completedTasks++;
+      log(`Descargando datos del mercado... (${completedTasks}/${totalTasks})`);
+    };
+    log(`Descargando datos del mercado... (0/${totalTasks})`);
+
+    // 1. Divisas (En lotes de 4)
+    const fxTasks = fxCurrencies.map(c => async () => {
       try { ctx.fxSeries.set(c, await DG.fetchFxSeries(c, from)); }
       catch { ctx.warnings.push("Sin serie FX para " + c); }
       finally { updateProgress(); }
     });
+    await runPool(fxTasks, 4);
 
-    const benchJobs = benchList.map(async b => {
+    // 2. Benchmarks (En lotes de 4)
+    const benchTasks = benchList.map(b => async () => {
       try {
         const { map, adjMap } = await DG.fetchYahooSeries(b.symbol, from);
         ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map, adjMap });
@@ -241,8 +249,10 @@
         ctx.warnings.push("Índice no disponible: " + b.label);
       } finally { updateProgress(); }
     });
+    await runPool(benchTasks, 4);
 
-    const prodJobs = isins.map(async isin => {
+    // 3. Productos (En lotes de 5 para no congelar la pantalla ni bloquear el proxy)
+    const prodTasks = isins.map(isin => async () => {
       const fbPoints = st.tradePricePoints.get(isin) || [];
       const fb = fbPoints.length ? DG.tradeFallbackSeries(fbPoints) : null;
       let symbol = DG.ISIN_TO_YAHOO[isin];
@@ -271,7 +281,7 @@
       updateProgress();
     });
 
-    await Promise.allSettled([...fxJobs, ...benchJobs, ...prodJobs]);
+    await runPool(prodTasks, 5);
   }
 
   function compute() {

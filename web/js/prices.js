@@ -1,13 +1,12 @@
 /**
  * prices.js — Precios históricos desde Yahoo Finance (vía proxy CORS público)
- * con fallback a los precios de tus propias operaciones.
+ * con fallback a los precios de tus propias operaciones y normalización de divisas.
  */
 "use strict";
 
 (function () {
   const DG = window.DG;
 
-  // Proxies CORS ampliados para mayor fiabilidad
   const PROXIES = [
     u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
     u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
@@ -22,7 +21,6 @@
     { id: "numantia", label: "Numantia Patrimonio", symbol: "0P000168OI.F", color: "#666f7a", on: false },
   ];
 
-  // ISIN conocidos -> símbolo Yahoo
   DG.ISIN_TO_YAHOO = {
     "US00217D1000": "ASTS",      
     "US5901061003": "MRLN",      
@@ -125,7 +123,6 @@
 
   const cache = new Map(); 
 
-  // CORTAFUEGOS: Añadido timeout de 6s para evitar carga infinita
   async function fetchJSON(url) {
     let lastErr;
     for (const p of PROXIES) {
@@ -149,11 +146,6 @@
     throw lastErr || new Error("fetch failed");
   }
 
-  /**
-   * Serie diaria de cierres de Yahoo. 
-   * Devuelve "map" (precios SIN ajustar para cuadrar el dinero real) 
-   * y "adjMap" (precios ajustados para pintar gráficos sin cortes)
-   */
   DG.fetchYahooSeries = async function (symbol, fromDate) {
     const key = "y:" + symbol;
     if (cache.has(key)) return cache.get(key);
@@ -171,7 +163,6 @@
       const adjMap = new Map();
       const meta = { currency: (r.meta && r.meta.currency) || "USD" };
       
-      // Procesar splits explícitamente para des-ajustar el precio hacia atrás y cuadrar la cartera
       const splits = [];
       if (r.events && r.events.splits) {
         for (const s of Object.values(r.events.splits)) {
@@ -212,7 +203,6 @@
     return promise;
   };
 
-  /** Buscar símbolo Yahoo por ISIN. */
   DG.searchYahooByISIN = async function (isin) {
     try {
       const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${isin}&quotesCount=3&newsCount=0`;
@@ -222,14 +212,12 @@
     } catch { return null; }
   };
 
-  /** Serie FX: cierres de EURUSD=X etc. */
   DG.fetchFxSeries = async function (cur, fromDate) {
     if (cur === "EUR") return null;
     const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
     return map; 
   };
 
-  /** Valor en una serie para un día, retrocediendo hasta 10 días si no cotiza. */
   DG.seriesAt = function (map, dayKey) {
     if (!map) return null;
     if (map.has(dayKey)) return map.get(dayKey);
@@ -242,23 +230,41 @@
     return null;
   };
 
-  /** Valida una serie de Yahoo contra los precios de las operaciones reales. */
-  DG.validateAgainstTrades = function (pp, tradePoints) {
+  DG.validateAgainstTrades = function (pp, tradePoints, fxSeries) {
     if (!pp || pp.kind !== "yahoo" || !tradePoints || !tradePoints.length) return "ok";
     let yCur = pp.meta.currency || "USD";
     const gbp = yCur === "GBp";
     const ratios = [];
+    
     for (const t of tradePoints) {
-      if (t.cur !== (gbp ? "GBP" : yCur)) continue;
       let y = DG.seriesAt(pp.map, DG.dayKey(t.date));
       if (y == null || !t.price) continue;
       if (gbp) y = y / 100;
-      ratios.push(y / t.price);
+      
+      const normalizedYCur = gbp ? "GBP" : yCur;
+      
+      if (normalizedYCur !== t.cur) {
+        let yInEur = y;
+        if (normalizedYCur !== "EUR" && fxSeries && fxSeries.has(normalizedYCur)) {
+           const fxY = DG.seriesAt(fxSeries.get(normalizedYCur), DG.dayKey(t.date));
+           if (fxY) yInEur = y / fxY;
+        }
+        let tInEur = t.price;
+        if (t.cur !== "EUR" && fxSeries && fxSeries.has(t.cur)) {
+           const fxT = DG.seriesAt(fxSeries.get(t.cur), DG.dayKey(t.date));
+           if (fxT) tInEur = t.price / fxT;
+        }
+        if (tInEur > 0) ratios.push(yInEur / tInEur);
+      } else {
+        ratios.push(y / t.price);
+      }
     }
+    
     if (ratios.length < 1) return "ok";
     ratios.sort((a, b) => a - b);
     const med = ratios[Math.floor(ratios.length / 2)];
     if (med > 0.67 && med < 1.5) return "ok"; 
+    
     const spread = ratios[ratios.length - 1] / ratios[0];
     if (spread < 1.6) {
       for (const [k, v] of pp.map) pp.map.set(k, v / med);
@@ -267,7 +273,6 @@
     return "rejected";
   };
 
-  /** Serie escalón a partir de los precios de las propias operaciones. */
   DG.tradeFallbackSeries = function (points) {
     const sorted = [...points].sort((a, b) => a.date - b.date);
     return {

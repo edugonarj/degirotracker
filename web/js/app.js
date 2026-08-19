@@ -233,8 +233,13 @@
       const fbPoints = st.tradePricePoints.get(isin) || [];
       const fb = fbPoints.length ? DG.tradeFallbackSeries(fbPoints) : null;
       let symbol = DG.ISIN_TO_YAHOO[isin];
+      const prodName = st.products.get(isin).name;
       const stillOpen = Math.abs(st.products.get(isin).qty) > 1e-9;
-      if (!symbol && stillOpen) symbol = await DG.searchYahooByISIN(isin);
+      
+      if (!symbol && stillOpen) {
+        symbol = await DG.searchYahooTicker(isin, prodName);
+      }
+
       if (symbol) {
         try {
           const { map, adjMap, meta } = await DG.fetchYahooSeries(symbol, from);

@@ -1,6 +1,6 @@
 /**
  * app.js — Orquestación del dashboard, cambio de idioma,
- * carga escalonada por lotes (concurrencia controlada) y filtros de tabla.
+ * carga optimizada de precios con progreso en vivo.
  */
 "use strict";
 
@@ -181,20 +181,6 @@
     if (spinner) spinner.style.display = isError ? "none" : "block";
   }
 
-  // Ejecutor por lotes para no saturar los proxies
-  async function runInPool(tasks, maxConcurrency = 4, delayMs = 100) {
-    const results = [];
-    for (let i = 0; i < tasks.length; i += maxConcurrency) {
-      const chunk = tasks.slice(i, i + maxConcurrency);
-      const res = await Promise.allSettled(chunk.map(fn => fn()));
-      results.push(...res);
-      if (delayMs > 0 && i + maxConcurrency < tasks.length) {
-        await new Promise(r => setTimeout(r, delayMs));
-      }
-    }
-    return results;
-  }
-
   async function handleFile(file) {
     try {
       log(`Leyendo ${file.name}…`);
@@ -206,10 +192,9 @@
       log(`${events.length} movimientos. Reconstruyendo cartera…`);
       ctx.state = DG.replay(events);
 
-      log("Descargando precios históricos de Yahoo Finance…");
       await loadAllPrices();
 
-      log("Calculando métricas…");
+      log("Calculando métricas finales…");
       compute();
       render();
       $("uploadView").classList.add("hidden");
@@ -224,16 +209,29 @@
     const st = ctx.state;
     const from = st.firstDate;
 
-    // 1. Descargar divisas prioritarias
+    let totalTasks = 0;
+    let completedTasks = 0;
+
+    const updateProgress = () => {
+      completedTasks++;
+      log(`Descargando cotizaciones... (${completedTasks}/${totalTasks})`);
+    };
+
     const fxCurrencies = [...st.currencies].filter(c => c !== "EUR");
-    const fxTasks = fxCurrencies.map(c => async () => {
+    const benchList = DG.BENCHMARKS;
+    const isins = [...st.products.keys()];
+
+    totalTasks = fxCurrencies.length + benchList.length + isins.length;
+    log(`Descargando cotizaciones... (0/${totalTasks})`);
+
+    // Disparamos todo en paralelo de forma natural (falla rápido si hay error)
+    const fxJobs = fxCurrencies.map(async c => {
       try { ctx.fxSeries.set(c, await DG.fetchFxSeries(c, from)); }
       catch { ctx.warnings.push("Sin serie FX para " + c); }
+      finally { updateProgress(); }
     });
-    await runInPool(fxTasks, 2, 80);
 
-    // 2. Descargar Benchmarks
-    const benchTasks = DG.BENCHMARKS.map(b => async () => {
+    const benchJobs = benchList.map(async b => {
       try {
         const { map, adjMap } = await DG.fetchYahooSeries(b.symbol, from);
         ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map, adjMap });
@@ -241,13 +239,10 @@
       } catch {
         ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map: null, adjMap: null });
         ctx.warnings.push("Índice no disponible: " + b.label);
-      }
+      } finally { updateProgress(); }
     });
-    await runInPool(benchTasks, 3, 100);
 
-    // 3. Descargar Productos de la cartera
-    const isins = [...st.products.keys()];
-    const prodTasks = isins.map(isin => async () => {
+    const prodJobs = isins.map(async isin => {
       const fbPoints = st.tradePricePoints.get(isin) || [];
       const fb = fbPoints.length ? DG.tradeFallbackSeries(fbPoints) : null;
       let symbol = DG.ISIN_TO_YAHOO[isin];
@@ -266,15 +261,17 @@
             const verdict = DG.validateAgainstTrades(pp, fbPoints, ctx.fxSeries);
             if (verdict !== "rejected") {
               ctx.priceProviders.set(isin, pp);
+              updateProgress();
               return;
             }
           }
         } catch { }
       }
       if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
+      updateProgress();
     });
 
-    await runInPool(prodTasks, 4, 120);
+    await Promise.allSettled([...fxJobs, ...benchJobs, ...prodJobs]);
   }
 
   function compute() {

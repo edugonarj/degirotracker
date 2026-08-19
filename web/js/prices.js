@@ -1,17 +1,16 @@
 /**
  * prices.js — Precios históricos desde Yahoo Finance (vía proxies CORS)
- * con fallback a los precios de tus propias operaciones y normalización segura.
- * Incluye diccionario actualizado y buscador dinámico inteligente.
+ * con fallback a los precios de tus propias operaciones y blindaje de Divisas.
  */
 "use strict";
 
 (function () {
   const DG = window.DG;
 
-  // Proxies ultra-rápidos y estables
+  // Proxies con timeout estricto
   const PROXIES = [
-    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
+    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)
   ];
 
   DG.BENCHMARKS = [
@@ -22,6 +21,7 @@
     { id: "numantia", label: "Numantia Patrimonio", symbol: "0P000168OI.F", color: "#666f7a", on: false },
   ];
 
+  // Diccionario maestro extendido
   DG.ISIN_TO_YAHOO = {
     "US00217D1000": "ASTS",      
     "US5901061003": "MRLN",      
@@ -121,7 +121,7 @@
     "US5949181045": "MSFT",
     "US67066G1040": "NVDA",
 
-    // Los 18 activos añadidos a mano para evitar rate limiting:
+    // Bloque 18 activos faltantes para evitar rate limiting + SpaceX
     "KYG651631007": "JOBY",      
     "KYG254571055": "CRDO",      
     "US46222L1089": "IONQ",      
@@ -153,7 +153,8 @@
     for (const p of PROXIES) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4500); // Falla rápido para no congelar la app
+        // Falla a los 3.5 segundos para no dejar la pantalla congelada
+        const timeoutId = setTimeout(() => controller.abort(), 3500); 
         
         const res = await fetch(p(url), { 
             headers: { Accept: "application/json" },
@@ -265,8 +266,18 @@
 
   DG.fetchFxSeries = async function (cur, fromDate) {
     if (cur === "EUR") return null;
-    const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
-    return map; 
+    try {
+      const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
+      if (!map || map.size === 0) throw new Error("FX fail");
+      return map; 
+    } catch (e) {
+      console.warn("Usando FX de emergencia para " + cur);
+      const dummy = new Map();
+      // BLINDAJE: Si el proxy falla, forzamos estos valores para que la cartera nunca valga 0€.
+      const fallbackRates = { "USD": 1.10, "GBP": 0.85, "CAD": 1.50, "DKK": 7.45, "CHF": 0.95 };
+      dummy.set("1990-01-01", fallbackRates[cur] || 1.0); 
+      return dummy;
+    }
   };
 
   DG.seriesAt = function (map, dayKey) {

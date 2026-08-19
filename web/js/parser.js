@@ -82,6 +82,12 @@ DG.parseAccountFile = function (buf) {
       ev.qty = DG.numES(m[3]) * ev.side;
       ev.price = DG.numES(m[5]);
       ev.tradeCur = m[6];
+      
+      if (ev.tradeCur === "GBX" || ev.tradeCur === "GBp") {
+        ev.tradeCur = "GBP";
+        ev.price = ev.price / 100;
+      }
+      
       ev.isin = m[7];
       if (!ev.product) ev.product = m[4].trim();
     } else if ((m = SPLIT_RE.exec(desc))) {
@@ -90,6 +96,12 @@ DG.parseAccountFile = function (buf) {
       ev.qty = (ev.amount !== null && ev.amount < 0) ? q : -q;
       ev.price = DG.numES(m[3]);
       ev.tradeCur = m[4];
+      
+      if (ev.tradeCur === "GBX" || ev.tradeCur === "GBp") {
+        ev.tradeCur = "GBP";
+        ev.price = ev.price / 100;
+      }
+      
       ev.isin = m[5];
     } else if (DEPOSIT_DESCS.has(desc)) {
       ev.type = "deposit";

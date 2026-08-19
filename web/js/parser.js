@@ -1,27 +1,20 @@
 /**
  * parser.js — Lee el Account.xlsx de DEGIRO y lo convierte en una lista de
  * eventos tipados en orden cronológico. Todo ocurre en el navegador.
- *
- * Estructura de columnas del export (12 columnas):
- * 0 Fecha | 1 Hora | 2 Fecha valor | 3 Producto | 4 ISIN | 5 Descripción
- * 6 Tipo (tipo de cambio en filas FX) | 7 Divisa variación | 8 Importe
- * 9 Divisa saldo | 10 Saldo | 11 ID Orden
  */
 "use strict";
 
 const DG = window.DG = window.DG || {};
 
-// "1.234,56" -> 1234.56
 DG.numES = function (s) {
   if (typeof s === "number") return s;
   if (!s) return NaN;
   return parseFloat(String(s).trim().replace(/\./g, "").replace(",", "."));
 };
 
-// "27-07-2026" o serial de Excel -> Date (UTC midnight)
 DG.parseDate = function (v) {
   if (v instanceof Date) return new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()));
-  if (typeof v === "number") { // serial Excel
+  if (typeof v === "number") {
     const d = new Date(Math.round((v - 25569) * 86400 * 1000));
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   }
@@ -41,23 +34,17 @@ const SPLIT_RE = /^AJUSTE POR SPLIT:\s*([\d.,]+)\s+([\s\S]*?)\s*@\s*([\d.,]+)\s+
 const DEPOSIT_DESCS = new Set(["flatex Deposit", "Flatex Instant Deposit", "Ingreso Sofort/Trustly", "Ingreso"]);
 const WITHDRAW_DESCS = new Set(["flatex Withdrawal", "Retirada"]);
 
-/**
- * @param {ArrayBuffer} buf archivo xlsx
- * @returns {{events: Array, warnings: string[]}}
- */
 DG.parseAccountFile = function (buf) {
   const wb = XLSX.read(buf, { type: "array", cellDates: false });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
 
-  // Quitar cabecera (primera fila que contenga "Fecha")
   let start = 0;
   for (let i = 0; i < Math.min(raw.length, 5); i++) {
     if (String(raw[i][0]).trim() === "Fecha") { start = i + 1; break; }
   }
   const rows = raw.slice(start).filter(r => r && r.some(c => c !== null && c !== ""));
 
-  // Unir filas de continuación (sin fecha) a la descripción anterior
   const merged = [];
   for (const r of rows) {
     const hasDate = r[0] !== null && r[0] !== "" && DG.parseDate(r[0]) !== null;
@@ -65,16 +52,14 @@ DG.parseAccountFile = function (buf) {
       const prev = merged[merged.length - 1];
       const a = String(prev[5] || "").replace(/\s+$/, "");
       const b = String(r[5] || "").trim();
-      // Si un número quedó partido entre filas ("…@3," + "636 EUR"), unir sin espacio
       const glue = (/[\d][.,]$/.test(a) && /^\d/.test(b)) ? "" : " ";
       prev[5] = a + glue + b;
-      // si la fila de continuación trae importe/ID y la principal no, conservarlos
       for (const c of [7, 8, 9, 10, 11]) if (prev[c] === null && r[c] !== null) prev[c] = r[c];
     } else if (hasDate) {
       merged.push(r.slice());
     }
   }
-  merged.reverse(); // el fichero viene de más nuevo a más viejo
+  merged.reverse();
 
   const events = [];
   const warnings = [];
@@ -102,7 +87,6 @@ DG.parseAccountFile = function (buf) {
     } else if ((m = SPLIT_RE.exec(desc))) {
       ev.type = "split";
       const q = DG.numES(m[1]);
-      // importe negativo = entran acciones (como una compra); positivo = salen
       ev.qty = (ev.amount !== null && ev.amount < 0) ? q : -q;
       ev.price = DG.numES(m[3]);
       ev.tradeCur = m[4];
@@ -112,16 +96,12 @@ DG.parseAccountFile = function (buf) {
     } else if (WITHDRAW_DESCS.has(desc)) {
       ev.type = "withdrawal";
     } else if (desc === "Reservation iDEAL") {
-      // DEGIRO adelanta el dinero reservado y lo revierte cuando llega el
-      // ingreso real: hay que tratarlo como flujo para no distorsionar la TWR
       ev.type = "reservation";
     } else if (desc === "Processed Flatex Withdrawal") {
-      // La retirada sale del cash un día antes del "flatex Withdrawal":
-      // también es flujo (el par +X/−X se anula en los totales)
       ev.type = "wprocessed";
     } else if (desc === "Ingreso Cambio de Divisa" || desc === "Retirada Cambio de Divisa") {
       ev.type = "fx";
-    } else if (desc === "Degiro Cash Sweep Transfer") {
+    } else if (desc === "Degiro Cash Sweep Transfer" || /fondos del mercado monetario/i.test(desc)) {
       ev.type = "sweep";
     } else if (/^Dividendo$/i.test(desc)) {
       ev.type = "dividend";

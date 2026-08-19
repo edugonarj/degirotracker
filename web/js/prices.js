@@ -1,8 +1,6 @@
 /**
- * prices.js — Precios históricos desde Yahoo Finance (vía proxy CORS público)
- * con fallback a los precios de tus propias operaciones y normalización segura.
- * Incluye un diccionario maestro ampliado y un buscador dinámico por ISIN/Nombre
- * como salvavidas.
+ * prices.js — Precios históricos desde Yahoo Finance (vía proxies CORS)
+ * con control de concurrencia (Throttling) y fallback a los precios de operaciones.
  */
 "use strict";
 
@@ -10,9 +8,10 @@
   const DG = window.DG;
 
   const PROXIES = [
-    u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
     u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
+    u => "https://corsproxy.io/?" + encodeURIComponent(u),
+    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+    u => "https://thingproxy.freeboard.io/fetch/" + encodeURIComponent(u)
   ];
 
   DG.BENCHMARKS = [
@@ -23,9 +22,7 @@
     { id: "numantia", label: "Numantia Patrimonio", symbol: "0P000168OI.F", color: "#666f7a", on: false },
   ];
 
-  // DICCIONARIO MAESTRO RESTAURADO Y ACTUALIZADO
   DG.ISIN_TO_YAHOO = {
-    // Los ISINs originales de tu archivo:
     "US00217D1000": "ASTS",      
     "US5901061003": "MRLN",      
     "CA0074082060": "ACT.TO",    
@@ -86,7 +83,7 @@
     "IE00B8K7KM88": "3USS.MI",   
     "CA55027C1068": "LMN.V",     
     "US92826C8394": "V",         
-    "IE00B7Y34M31": "3USL.MI", // Corregido a Milán para coincidir en EUR
+    "IE00B7Y34M31": "3USL.MI",    
     "GB0006215205": "MCG.L",     
     "AU000000KPG7": "KPG.AX",    
     "US17253J1060": "CIFR",      
@@ -123,8 +120,6 @@
     "US64110L1061": "NFLX",
     "US5949181045": "MSFT",
     "US67066G1040": "NVDA",
-
-    // LOS 18 ACTIVOS FALTANTES AÑADIDOS A MANO PARA EVITAR RATE LIMITING:
     "KYG651631007": "JOBY",      
     "KYG254571055": "CRDO",      
     "US46222L1089": "IONQ",      
@@ -142,12 +137,11 @@
     "US8740391003": "TSM",       
     "US78392B2060": "HXSCF",     
     "US78392B1070": "HXSCF",     
-    "US84615Q1031": "SPCX" // SpaceX reciente
+    "US84615Q1031": "SPCX"
   };
 
   const cache = new Map(); 
 
-  // Memoria caché local para el buscador automático de nuevas empresas
   const LOCAL_MAP_KEY = "dg_isin_map";
   let localMap = {};
   try { localMap = JSON.parse(localStorage.getItem(LOCAL_MAP_KEY)) || {}; } catch(e){}
@@ -157,7 +151,7 @@
     for (const p of PROXIES) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000); 
+        const timeoutId = setTimeout(() => controller.abort(), 7000); 
         
         const res = await fetch(p(url), { 
             headers: { Accept: "application/json" },
@@ -167,7 +161,8 @@
         clearTimeout(timeoutId);
         
         if (!res.ok) throw new Error("HTTP " + res.status);
-        return await res.json();
+        const data = await res.json();
+        return data.contents ? JSON.parse(data.contents) : data;
       } catch (e) { 
         lastErr = e; 
       }
@@ -183,56 +178,57 @@
     const p2 = Math.floor(Date.now() / 1000) + 86400;
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&events=div%2Csplit`;
     
-    const promise = fetchJSON(url).then(j => {
-      const r = j.chart && j.chart.result && j.chart.result[0];
-      if (!r || !r.timestamp) throw new Error("sin datos para " + symbol);
-      
-      const closes = r.indicators.quote[0].close;
-      const map = new Map();
-      const adjMap = new Map();
-      const meta = { currency: (r.meta && r.meta.currency) || "USD" };
-      
-      const splits = [];
-      if (r.events && r.events.splits) {
-        for (const s of Object.values(r.events.splits)) {
-          const f = (s.numerator && s.denominator) ? s.numerator / s.denominator : null;
-          if (f && f > 0) splits.push({ day: new Date(s.date * 1000).toISOString().slice(0, 10), f });
+    const promise = (async () => {
+      try {
+        const j = await fetchJSON(url);
+        const r = j.chart && j.chart.result && j.chart.result[0];
+        if (!r || !r.timestamp) throw new Error("sin datos para " + symbol);
+        
+        const closes = r.indicators.quote[0].close;
+        const map = new Map();
+        const adjMap = new Map();
+        const meta = { currency: (r.meta && r.meta.currency) || "USD" };
+        
+        const splits = [];
+        if (r.events && r.events.splits) {
+          for (const s of Object.values(r.events.splits)) {
+            const f = (s.numerator && s.denominator) ? s.numerator / s.denominator : null;
+            if (f && f > 0) splits.push({ day: new Date(s.date * 1000).toISOString().slice(0, 10), f });
+          }
+          splits.sort((a, b) => (a.day < b.day ? -1 : 1));
         }
-        splits.sort((a, b) => (a.day < b.day ? -1 : 1));
-      }
-      
-      const factorAfter = day => {
-        let f = 1;
-        for (const s of splits) if (s.day > day) f *= s.f;
-        return f;
-      };
-      
-      r.timestamp.forEach((t, i) => {
-        const c = closes[i];
-        if (c != null) {
-          const day = new Date(t * 1000).toISOString().slice(0, 10);
-          adjMap.set(day, c);
-          map.set(day, c * (splits.length ? factorAfter(day) : 1));
+        
+        const factorAfter = day => {
+          let f = 1;
+          for (const s of splits) if (s.day > day) f *= s.f;
+          return f;
+        };
+        
+        r.timestamp.forEach((t, i) => {
+          const c = closes[i];
+          if (c != null) {
+            const day = new Date(t * 1000).toISOString().slice(0, 10);
+            adjMap.set(day, c);
+            map.set(day, c * (splits.length ? factorAfter(day) : 1));
+          }
+        });
+        
+        if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
+          const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
+          map.set(day, r.meta.regularMarketPrice);
+          adjMap.set(day, r.meta.regularMarketPrice);
         }
-      });
-      
-      if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
-        const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
-        map.set(day, r.meta.regularMarketPrice);
-        adjMap.set(day, r.meta.regularMarketPrice);
+        return { map, adjMap, meta };
+      } catch (e) {
+        console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Usando fallback.", e);
+        return { map: new Map(), adjMap: new Map(), meta: {} };
       }
-      return { map, adjMap, meta };
-      
-    }).catch(e => {
-      console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Activando salvavidas (fallback).", e);
-      return { map: new Map(), adjMap: new Map(), meta: {} };
-    });
+    })();
 
     cache.set(key, promise);
     return promise;
   };
 
-  // Buscador de emergencia para las acciones que no están en el diccionario
   DG.searchYahooTicker = async function (isin, name) {
     if (localMap[isin]) return localMap[isin];
 
@@ -272,20 +268,22 @@
   };
 
   DG.seriesAt = function (map, dayKey) {
-    if (!map) return null;
+    if (!map || map.size === 0) return null;
     if (map.has(dayKey)) return map.get(dayKey);
     const d = new Date(dayKey + "T00:00:00Z");
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= 15; i++) {
       d.setUTCDate(d.getUTCDate() - 1);
       const k = d.toISOString().slice(0, 10);
       if (map.has(k)) return map.get(k);
     }
-    return null;
+    const allVals = Array.from(map.values());
+    return allVals.length > 0 ? allVals[allVals.length - 1] : null;
   };
 
   DG.validateAgainstTrades = function (pp, tradePoints, fxSeries) {
     if (!pp || pp.kind !== "yahoo" || !tradePoints || !tradePoints.length) return "ok";
-    
+    if (!pp.map || pp.map.size === 0) return "rejected";
+
     let yCur = pp.meta.currency || "USD";
     const yIsPence = (yCur === "GBp" || yCur === "GBX");
     const normalizedYCur = yIsPence ? "GBP" : yCur;
@@ -297,7 +295,6 @@
       if (y == null || !t.price) continue;
       
       let yNorm = yIsPence ? y / 100 : y;
-      
       let tCur = t.cur || "EUR";
       let tIsPence = (tCur === "GBX" || tCur === "GBp");
       let normalizedTCur = tIsPence ? "GBP" : tCur;

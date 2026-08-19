@@ -1,6 +1,6 @@
 /**
- * app.js — Orquestación del dashboard, cambio de idioma en header,
- * y filtros/ordenación en la tabla de acciones.
+ * app.js — Orquestación del dashboard, cambio de idioma,
+ * carga escalonada por lotes (concurrencia controlada) y filtros de tabla.
  */
 "use strict";
 
@@ -181,6 +181,20 @@
     if (spinner) spinner.style.display = isError ? "none" : "block";
   }
 
+  // Ejecutor por lotes para no saturar los proxies
+  async function runInPool(tasks, maxConcurrency = 4, delayMs = 100) {
+    const results = [];
+    for (let i = 0; i < tasks.length; i += maxConcurrency) {
+      const chunk = tasks.slice(i, i + maxConcurrency);
+      const res = await Promise.allSettled(chunk.map(fn => fn()));
+      results.push(...res);
+      if (delayMs > 0 && i + maxConcurrency < tasks.length) {
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
+    return results;
+  }
+
   async function handleFile(file) {
     try {
       log(`Leyendo ${file.name}…`);
@@ -192,7 +206,7 @@
       log(`${events.length} movimientos. Reconstruyendo cartera…`);
       ctx.state = DG.replay(events);
 
-      log("Descargando precios históricos (Yahoo Finance)…");
+      log("Descargando precios históricos de Yahoo Finance…");
       await loadAllPrices();
 
       log("Calculando métricas…");
@@ -210,14 +224,16 @@
     const st = ctx.state;
     const from = st.firstDate;
 
-    const fxJobs = [...st.currencies].filter(c => c !== "EUR").map(async c => {
+    // 1. Descargar divisas prioritarias
+    const fxCurrencies = [...st.currencies].filter(c => c !== "EUR");
+    const fxTasks = fxCurrencies.map(c => async () => {
       try { ctx.fxSeries.set(c, await DG.fetchFxSeries(c, from)); }
       catch { ctx.warnings.push("Sin serie FX para " + c); }
     });
+    await runInPool(fxTasks, 2, 80);
 
-    await Promise.allSettled(fxJobs);
-
-    const benchJobs = DG.BENCHMARKS.map(async b => {
+    // 2. Descargar Benchmarks
+    const benchTasks = DG.BENCHMARKS.map(b => async () => {
       try {
         const { map, adjMap } = await DG.fetchYahooSeries(b.symbol, from);
         ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map, adjMap });
@@ -227,9 +243,11 @@
         ctx.warnings.push("Índice no disponible: " + b.label);
       }
     });
+    await runInPool(benchTasks, 3, 100);
 
+    // 3. Descargar Productos de la cartera
     const isins = [...st.products.keys()];
-    const prodJobs = isins.map(async isin => {
+    const prodTasks = isins.map(isin => async () => {
       const fbPoints = st.tradePricePoints.get(isin) || [];
       const fb = fbPoints.length ? DG.tradeFallbackSeries(fbPoints) : null;
       let symbol = DG.ISIN_TO_YAHOO[isin];
@@ -243,20 +261,20 @@
       if (symbol) {
         try {
           const { map, adjMap, meta } = await DG.fetchYahooSeries(symbol, from);
-          const pp = { kind: "yahoo", map, adjMap, meta, fb };
-          const verdict = DG.validateAgainstTrades(pp, fbPoints, ctx.fxSeries);
-          if (verdict === "rejected") {
-            if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
-            return;
+          if (map && map.size > 0) {
+            const pp = { kind: "yahoo", map, adjMap, meta, fb };
+            const verdict = DG.validateAgainstTrades(pp, fbPoints, ctx.fxSeries);
+            if (verdict !== "rejected") {
+              ctx.priceProviders.set(isin, pp);
+              return;
+            }
           }
-          ctx.priceProviders.set(isin, pp);
-          return;
         } catch { }
       }
       if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
     });
 
-    await Promise.allSettled([...benchJobs, ...prodJobs]);
+    await runInPool(prodTasks, 4, 120);
   }
 
   function compute() {
@@ -377,7 +395,7 @@
       const s = ctx.benchSeries.get(b.id);
       const div = document.createElement("div");
       div.id = `toggle-bench-${b.id}`;
-      const avail = s && s.map;
+      const avail = s && s.map && s.map.size > 0;
       div.className = "toggle" + (avail ? (ctx.visibleBench.has(b.id) ? "" : " off") : " unavailable");
       
       const r = avail ? getRangeReturn(s.adjMap || s.map) : null;
@@ -454,7 +472,7 @@
        const div = $(`toggle-bench-${b.id}`);
        if (div) {
          const s = ctx.benchSeries.get(b.id);
-         const avail = s && s.map;
+         const avail = s && s.map && s.map.size > 0;
          if (avail) {
            div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}${getRetStr(s.adjMap || s.map)}`;
          }

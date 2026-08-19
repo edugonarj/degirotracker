@@ -1,6 +1,6 @@
 /**
- * app.js — Orquestación del dashboard y
- * carga optimizada de peticiones con Throttling para no bloquear proxies.
+ * app.js — Orquestación del dashboard, cambio de idioma en header,
+ * y filtros/ordenación en la tabla de acciones.
  */
 "use strict";
 
@@ -192,9 +192,10 @@
       log(`${events.length} movimientos. Reconstruyendo cartera…`);
       ctx.state = DG.replay(events);
 
+      log("Descargando precios históricos (Yahoo Finance)…");
       await loadAllPrices();
 
-      log("Calculando métricas finales…");
+      log("Calculando métricas…");
       compute();
       render();
       $("uploadView").classList.add("hidden");
@@ -205,41 +206,16 @@
     }
   }
 
-  // Cola de ejecución para evitar rate limiting (HTTP 429) de los proxies CORS
-  async function runPool(tasks, maxConcurrency) {
-    for (let i = 0; i < tasks.length; i += maxConcurrency) {
-      const chunk = tasks.slice(i, i + maxConcurrency);
-      await Promise.allSettled(chunk.map(fn => fn()));
-    }
-  }
-
   async function loadAllPrices() {
     const st = ctx.state;
     const from = st.firstDate;
 
-    const fxCurrencies = [...st.currencies].filter(c => c !== "EUR");
-    const benchList = DG.BENCHMARKS;
-    const isins = [...st.products.keys()];
-
-    let totalTasks = fxCurrencies.length + benchList.length + isins.length;
-    let completedTasks = 0;
-
-    const updateProgress = () => {
-      completedTasks++;
-      log(`Descargando datos del mercado... (${completedTasks}/${totalTasks})`);
-    };
-    log(`Descargando datos del mercado... (0/${totalTasks})`);
-
-    // 1. Divisas (En lotes de 4)
-    const fxTasks = fxCurrencies.map(c => async () => {
+    const fxJobs = [...st.currencies].filter(c => c !== "EUR").map(async c => {
       try { ctx.fxSeries.set(c, await DG.fetchFxSeries(c, from)); }
       catch { ctx.warnings.push("Sin serie FX para " + c); }
-      finally { updateProgress(); }
     });
-    await runPool(fxTasks, 4);
 
-    // 2. Benchmarks (En lotes de 4)
-    const benchTasks = benchList.map(b => async () => {
+    const benchJobs = DG.BENCHMARKS.map(async b => {
       try {
         const { map, adjMap } = await DG.fetchYahooSeries(b.symbol, from);
         ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map, adjMap });
@@ -247,41 +223,33 @@
       } catch {
         ctx.benchSeries.set(b.id, { label: b.label, color: b.color, map: null, adjMap: null });
         ctx.warnings.push("Índice no disponible: " + b.label);
-      } finally { updateProgress(); }
+      }
     });
-    await runPool(benchTasks, 4);
 
-    // 3. Productos (En lotes de 5 para no congelar la pantalla ni bloquear el proxy)
-    const prodTasks = isins.map(isin => async () => {
+    const isins = [...st.products.keys()];
+    const prodJobs = isins.map(async isin => {
       const fbPoints = st.tradePricePoints.get(isin) || [];
       const fb = fbPoints.length ? DG.tradeFallbackSeries(fbPoints) : null;
       let symbol = DG.ISIN_TO_YAHOO[isin];
-      const prodName = st.products.get(isin).name;
       const stillOpen = Math.abs(st.products.get(isin).qty) > 1e-9;
-      
-      if (!symbol && stillOpen) {
-        symbol = await DG.searchYahooTicker(isin, prodName);
-      }
-
+      if (!symbol && stillOpen) symbol = await DG.searchYahooByISIN(isin);
       if (symbol) {
         try {
           const { map, adjMap, meta } = await DG.fetchYahooSeries(symbol, from);
-          if (map && map.size > 0) {
-            const pp = { kind: "yahoo", map, adjMap, meta, fb };
-            const verdict = DG.validateAgainstTrades(pp, fbPoints, ctx.fxSeries);
-            if (verdict !== "rejected") {
-              ctx.priceProviders.set(isin, pp);
-              updateProgress();
-              return;
-            }
+          const pp = { kind: "yahoo", map, adjMap, meta, fb };
+          const verdict = DG.validateAgainstTrades(pp, fbPoints);
+          if (verdict === "rejected") {
+            if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
+            return;
           }
+          ctx.priceProviders.set(isin, pp);
+          return;
         } catch { }
       }
       if (fb) ctx.priceProviders.set(isin, { kind: "fallback", fb });
-      updateProgress();
     });
 
-    await runPool(prodTasks, 5);
+    await Promise.allSettled([...fxJobs, ...benchJobs, ...prodJobs]);
   }
 
   function compute() {
@@ -402,7 +370,7 @@
       const s = ctx.benchSeries.get(b.id);
       const div = document.createElement("div");
       div.id = `toggle-bench-${b.id}`;
-      const avail = s && s.map && s.map.size > 0;
+      const avail = s && s.map;
       div.className = "toggle" + (avail ? (ctx.visibleBench.has(b.id) ? "" : " off") : " unavailable");
       
       const r = avail ? getRangeReturn(s.adjMap || s.map) : null;
@@ -479,7 +447,7 @@
        const div = $(`toggle-bench-${b.id}`);
        if (div) {
          const s = ctx.benchSeries.get(b.id);
-         const avail = s && s.map && s.map.size > 0;
+         const avail = s && s.map;
          if (avail) {
            div.innerHTML = `<span class="dot" style="background:${b.color}"></span>${b.label}${getRetStr(s.adjMap || s.map)}`;
          }

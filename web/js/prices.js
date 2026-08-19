@@ -1,16 +1,17 @@
 /**
- * prices.js — Precios históricos desde Yahoo Finance (vía proxies CORS)
- * con fallback a los precios de tus propias operaciones y blindaje de Divisas.
+ * prices.js — Precios históricos desde Yahoo Finance (vía proxy CORS público)
+ * con fallback a los precios de tus propias operaciones.
  */
 "use strict";
 
 (function () {
   const DG = window.DG;
 
-  // Proxies con timeout estricto
+  // Proxies CORS originales
   const PROXIES = [
-    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
-    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u)
+    u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
   ];
 
   DG.BENCHMARKS = [
@@ -21,7 +22,7 @@
     { id: "numantia", label: "Numantia Patrimonio", symbol: "0P000168OI.F", color: "#666f7a", on: false },
   ];
 
-  // Diccionario maestro extendido
+  // Diccionario maestro exacto y ampliado con toda tu cartera real
   DG.ISIN_TO_YAHOO = {
     "US00217D1000": "ASTS",      
     "US5901061003": "MRLN",      
@@ -83,7 +84,7 @@
     "IE00B8K7KM88": "3USS.MI",   
     "CA55027C1068": "LMN.V",     
     "US92826C8394": "V",         
-    "IE00B7Y34M31": "3USL.MI",    
+    "IE00B7Y34M31": "3USL.MI", // Solución a la bajada brusca en euros
     "GB0006215205": "MCG.L",     
     "AU000000KPG7": "KPG.AX",    
     "US17253J1060": "CIFR",      
@@ -121,7 +122,7 @@
     "US5949181045": "MSFT",
     "US67066G1040": "NVDA",
 
-    // Bloque 18 activos faltantes para evitar rate limiting + SpaceX
+    // LOS 18 ACTIVOS FALTANTES QUE ARREGLAN LOS 128k:
     "KYG651631007": "JOBY",      
     "KYG254571055": "CRDO",      
     "US46222L1089": "IONQ",      
@@ -144,17 +145,12 @@
 
   const cache = new Map(); 
 
-  const LOCAL_MAP_KEY = "dg_isin_map";
-  let localMap = {};
-  try { localMap = JSON.parse(localStorage.getItem(LOCAL_MAP_KEY)) || {}; } catch(e){}
-
   async function fetchJSON(url) {
     let lastErr;
     for (const p of PROXIES) {
       try {
         const controller = new AbortController();
-        // Falla a los 3.5 segundos para no dejar la pantalla congelada
-        const timeoutId = setTimeout(() => controller.abort(), 3500); 
+        const timeoutId = setTimeout(() => controller.abort(), 6000); 
         
         const res = await fetch(p(url), { 
             headers: { Accept: "application/json" },
@@ -164,8 +160,7 @@
         clearTimeout(timeoutId);
         
         if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        return data.contents ? JSON.parse(data.contents) : data;
+        return await res.json();
       } catch (e) { 
         lastErr = e; 
       }
@@ -181,168 +176,107 @@
     const p2 = Math.floor(Date.now() / 1000) + 86400;
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&events=div%2Csplit`;
     
-    const promise = (async () => {
-      try {
-        const j = await fetchJSON(url);
-        const r = j.chart && j.chart.result && j.chart.result[0];
-        if (!r || !r.timestamp) throw new Error("sin datos para " + symbol);
-        
-        const closes = r.indicators.quote[0].close;
-        const map = new Map();
-        const adjMap = new Map();
-        const meta = { currency: (r.meta && r.meta.currency) || "USD" };
-        
-        const splits = [];
-        if (r.events && r.events.splits) {
-          for (const s of Object.values(r.events.splits)) {
-            const f = (s.numerator && s.denominator) ? s.numerator / s.denominator : null;
-            if (f && f > 0) splits.push({ day: new Date(s.date * 1000).toISOString().slice(0, 10), f });
-          }
-          splits.sort((a, b) => (a.day < b.day ? -1 : 1));
+    const promise = fetchJSON(url).then(j => {
+      const r = j.chart && j.chart.result && j.chart.result[0];
+      if (!r || !r.timestamp) throw new Error("sin datos para " + symbol);
+      
+      const closes = r.indicators.quote[0].close;
+      const map = new Map();
+      const adjMap = new Map();
+      const meta = { currency: (r.meta && r.meta.currency) || "USD" };
+      
+      const splits = [];
+      if (r.events && r.events.splits) {
+        for (const s of Object.values(r.events.splits)) {
+          const f = (s.numerator && s.denominator) ? s.numerator / s.denominator : null;
+          if (f && f > 0) splits.push({ day: new Date(s.date * 1000).toISOString().slice(0, 10), f });
         }
-        
-        const factorAfter = day => {
-          let f = 1;
-          for (const s of splits) if (s.day > day) f *= s.f;
-          return f;
-        };
-        
-        r.timestamp.forEach((t, i) => {
-          const c = closes[i];
-          if (c != null) {
-            const day = new Date(t * 1000).toISOString().slice(0, 10);
-            adjMap.set(day, c);
-            map.set(day, c * (splits.length ? factorAfter(day) : 1));
-          }
-        });
-        
-        if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
-          const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
-          map.set(day, r.meta.regularMarketPrice);
-          adjMap.set(day, r.meta.regularMarketPrice);
-        }
-        return { map, adjMap, meta };
-      } catch (e) {
-        console.warn("Fallo al obtener precios de Yahoo para: " + symbol, e);
-        return { map: new Map(), adjMap: new Map(), meta: {} };
+        splits.sort((a, b) => (a.day < b.day ? -1 : 1));
       }
-    })();
+      
+      const factorAfter = day => {
+        let f = 1;
+        for (const s of splits) if (s.day > day) f *= s.f;
+        return f;
+      };
+      
+      r.timestamp.forEach((t, i) => {
+        const c = closes[i];
+        if (c != null) {
+          const day = new Date(t * 1000).toISOString().slice(0, 10);
+          adjMap.set(day, c);
+          map.set(day, c * (splits.length ? factorAfter(day) : 1));
+        }
+      });
+      
+      if (r.meta && r.meta.regularMarketPrice != null && r.meta.regularMarketTime) {
+        const day = new Date(r.meta.regularMarketTime * 1000).toISOString().slice(0, 10);
+        map.set(day, r.meta.regularMarketPrice);
+        adjMap.set(day, r.meta.regularMarketPrice);
+      }
+      return { map, adjMap, meta };
+      
+    }).catch(e => {
+      console.warn("Fallo al obtener precios de Yahoo para: " + symbol + ". Activando salvavidas (fallback).", e);
+      return { map: new Map(), adjMap: new Map(), meta: {} };
+    });
 
     cache.set(key, promise);
     return promise;
   };
 
-  DG.searchYahooTicker = async function (isin, name) {
-    if (localMap[isin]) return localMap[isin];
-
-    const fetchSearch = async (query) => {
-      if (!query) return null;
-      try {
-        const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=3&newsCount=0`;
-        const j = await fetchJSON(url);
-        if (j && j.quotes && j.quotes.length > 0) {
-          const valid = j.quotes.find(q => q.quoteType === "EQUITY" || q.quoteType === "ETF" || q.quoteType === "MUTUALFUND");
-          return valid ? valid.symbol : j.quotes[0].symbol;
-        }
-      } catch (e) {}
-      return null;
-    };
-
-    let symbol = await fetchSearch(isin);
-    
-    if (!symbol && name) {
-      let cleanName = name.replace(/Class [A-Z]/ig, "").replace(/,?\s*(Inc\.|Corp\.|Ltd\.|LLC|PLC|SA|SE|A\/S|Group)\b/ig, "").trim();
-      cleanName = cleanName.split(" ").slice(0, 3).join(" ");
-      symbol = await fetchSearch(cleanName);
-    }
-
-    if (symbol) {
-      localMap[isin] = symbol;
-      localStorage.setItem(LOCAL_MAP_KEY, JSON.stringify(localMap));
-      return symbol;
-    }
-    return null;
+  DG.searchYahooByISIN = async function (isin) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${isin}&quotesCount=3&newsCount=0`;
+      const j = await fetchJSON(url);
+      const q = j.quotes && j.quotes[0];
+      return q ? q.symbol : null;
+    } catch { return null; }
   };
 
   DG.fetchFxSeries = async function (cur, fromDate) {
     if (cur === "EUR") return null;
-    try {
-      const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
-      if (!map || map.size === 0) throw new Error("FX fail");
-      return map; 
-    } catch (e) {
-      console.warn("Usando FX de emergencia para " + cur);
-      const dummy = new Map();
-      // BLINDAJE: Si el proxy falla, forzamos estos valores para que la cartera nunca valga 0€.
-      const fallbackRates = { "USD": 1.10, "GBP": 0.85, "CAD": 1.50, "DKK": 7.45, "CHF": 0.95 };
-      dummy.set("1990-01-01", fallbackRates[cur] || 1.0); 
-      return dummy;
-    }
+    const { map } = await DG.fetchYahooSeries(`EUR${cur}=X`, fromDate);
+    if (map && map.size > 0) return map;
+    
+    // El blindaje contra el error de 1.2k de cartera si falla el proxy
+    console.warn("Usando FX de emergencia estático para " + cur);
+    const dummy = new Map();
+    const fallbackRates = { "USD": 1.10, "GBP": 0.85, "CAD": 1.50, "DKK": 7.45, "CHF": 0.95 };
+    dummy.set("1990-01-01", fallbackRates[cur] || 1.0); 
+    return dummy;
   };
 
   DG.seriesAt = function (map, dayKey) {
     if (!map || map.size === 0) return null;
     if (map.has(dayKey)) return map.get(dayKey);
     const d = new Date(dayKey + "T00:00:00Z");
-    for (let i = 1; i <= 15; i++) {
+    for (let i = 1; i <= 10; i++) {
       d.setUTCDate(d.getUTCDate() - 1);
       const k = d.toISOString().slice(0, 10);
       if (map.has(k)) return map.get(k);
     }
+    // Soporte para que los tipos de cambio de emergencia sigan funcionando
     const allVals = Array.from(map.values());
     return allVals.length > 0 ? allVals[allVals.length - 1] : null;
   };
 
-  DG.validateAgainstTrades = function (pp, tradePoints, fxSeries) {
+  DG.validateAgainstTrades = function (pp, tradePoints) {
     if (!pp || pp.kind !== "yahoo" || !tradePoints || !tradePoints.length) return "ok";
-    if (!pp.map || pp.map.size === 0) return "rejected";
-
     let yCur = pp.meta.currency || "USD";
-    const yIsPence = (yCur === "GBp" || yCur === "GBX");
-    const normalizedYCur = yIsPence ? "GBP" : yCur;
-
+    const gbp = yCur === "GBp";
     const ratios = [];
-    
     for (const t of tradePoints) {
+      if (t.cur !== (gbp ? "GBP" : yCur)) continue;
       let y = DG.seriesAt(pp.map, DG.dayKey(t.date));
       if (y == null || !t.price) continue;
-      
-      let yNorm = yIsPence ? y / 100 : y;
-      let tCur = t.cur || "EUR";
-      let tIsPence = (tCur === "GBX" || tCur === "GBp");
-      let normalizedTCur = tIsPence ? "GBP" : tCur;
-      let tNorm = tIsPence ? t.price / 100 : t.price;
-      
-      if (normalizedYCur !== normalizedTCur) {
-        let yInEur = yNorm;
-        if (normalizedYCur !== "EUR") {
-           if (fxSeries && fxSeries.has(normalizedYCur)) {
-               const fxY = DG.seriesAt(fxSeries.get(normalizedYCur), DG.dayKey(t.date));
-               if (fxY) yInEur = yNorm / fxY;
-               else continue; 
-           } else continue; 
-        }
-        
-        let tInEur = tNorm;
-        if (normalizedTCur !== "EUR") {
-           if (fxSeries && fxSeries.has(normalizedTCur)) {
-               const fxT = DG.seriesAt(fxSeries.get(normalizedTCur), DG.dayKey(t.date));
-               if (fxT) tInEur = tNorm / fxT;
-               else continue; 
-           } else continue; 
-        }
-        
-        if (tInEur > 0) ratios.push(yInEur / tInEur);
-      } else {
-        if (tNorm > 0) ratios.push(yNorm / tNorm);
-      }
+      if (gbp) y = y / 100;
+      ratios.push(y / t.price);
     }
-    
     if (ratios.length < 1) return "ok";
     ratios.sort((a, b) => a - b);
     const med = ratios[Math.floor(ratios.length / 2)];
     if (med > 0.67 && med < 1.5) return "ok"; 
-    
     const spread = ratios[ratios.length - 1] / ratios[0];
     if (spread < 1.6) {
       for (const [k, v] of pp.map) pp.map.set(k, v / med);
